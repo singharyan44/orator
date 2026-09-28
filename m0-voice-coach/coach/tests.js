@@ -19,6 +19,7 @@ const { opponentReply, diagnoseDebate } = require('./debate-llm');
 const { ROLES, getRole, validateQuestion, validateInterviewDiagnosis, stockFollowup, diagnoseInterviewRules } = require('./interview');
 const { interviewerNext, diagnoseInterview } = require('./interview-llm');
 const { buildVoiceOpponentPrompt } = require('./voice-opponent');
+const { splitSpokenText } = require('../public/speech-out');
 const { formatElapsed, dayStats } = require('../public/stats');
 const { buildSessionText, verdictSummary } = require('../public/export-text');
 const { analyzeWithVision, buildVisionMessages, validateVisionFeedback, getVisionConfig } = require('./vision');
@@ -651,5 +652,24 @@ if (fail) process.exit(1);
   }
 
   console.log('STATS-RESULT pass=' + pass + ' fail=' + fail);
+
+  // ---------- spoken-output chunking (macOS Safari-safe TTS) ----------
+  {
+    ok('speech short passthrough', JSON.stringify(splitSpokenText('Hello world.', 220)) === JSON.stringify(['Hello world.']), '');
+    const multi = splitSpokenText('First sentence here. Second sentence there! And a third one?', 25);
+    ok('speech sentence split', multi.length === 3, ' got ' + multi.length);
+    const joined = ['a'.repeat(100) + '.', 'b'.repeat(100) + '.', 'c'.repeat(100) + '.'].join(' ');
+    const packed = splitSpokenText(joined, 220);
+    ok('speech packing', packed.length === 2 && packed.every((c) => c.length <= 220), JSON.stringify(packed.map((c) => c.length)));
+    const monster = splitSpokenText('word '.repeat(100).trim() + '.', 220);
+    ok('speech force-split', monster.length > 1 && monster.every((c) => c.length <= 220), '');
+    ok('speech empty', splitSpokenText('   ', 220).length === 0 && splitSpokenText(null, 220).length === 0, '');
+    const src = 'Um, so like, I think this works. Do you agree? Great stuff here!';
+    const back = splitSpokenText(src, 220).join(' ');
+    const norm = (s) => s.replace(/\s+/g, ' ').trim();
+    ok('speech lossless', norm(back) === norm(src), '');
+  }
+
+  console.log('SPEECH-RESULT pass=' + pass + ' fail=' + fail);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.log('FAIL llm harness crashed: ' + e.message); process.exit(1); });

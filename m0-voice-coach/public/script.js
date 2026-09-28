@@ -601,31 +601,77 @@ sampleABtn.addEventListener('click', () => playSample('speech-weak', 'Sample 1',
 sampleBBtn.addEventListener('click', () => playSample('speech-clean', 'Sample 2', promptTitleEl.textContent + '. ' + promptObjectiveEl.textContent));
 
 // Speak text aloud via built-in browser TTS. The LIVE mic captures it, so
-// AssemblyAI transcribes it exactly like user speech. Resolves when done,
-// on error, or if the connection drops mid-speech.
-function speakText(text) {
+// AssemblyAI transcribes it exactly like user speech. Hardened for macOS
+// Safari: voices arrive late (waited for), long utterances stall (spoken in
+// sentence chunks + resume watchdog), quality varies (local English voice
+// preferred). Resolves when done, on error, or if the connection drops.
+let cachedVoices = null;
+
+function ensureVoices() {
+  if (!('speechSynthesis' in window)) return Promise.resolve([]);
+  const have = speechSynthesis.getVoices();
+  if (have.length > 0) return Promise.resolve(have);
+  if (!cachedVoices) {
+    cachedVoices = new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(speechSynthesis.getVoices()), 1500);
+      try {
+        speechSynthesis.onvoiceschanged = () => {
+          clearTimeout(timer);
+          resolve(speechSynthesis.getVoices());
+        };
+      } catch (e) { /* ignore */ }
+    });
+  }
+  return cachedVoices;
+}
+
+function pickVoice(voices) {
+  const en = (voices || []).filter((v) => v.lang && v.lang.toLowerCase().startsWith('en'));
+  if (!en.length) return null;
+  return en.find((v) => v.localService) || en.find((v) => v.default) || en[0];
+}
+
+function speakChunk(text, voice) {
   return new Promise((resolve) => {
     try {
-      if (!('speechSynthesis' in window)) { resolve(); return; }
-      speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'en-US';
       u.rate = 1;
-      const v = speechSynthesis.getVoices().find((vv) => vv.lang && vv.lang.toLowerCase().startsWith('en'));
-      if (v) u.voice = v;
+      if (voice) u.voice = voice;
       let done = false;
-      const finish = () => { if (!done) { done = true; clearInterval(watch); resolve(); } };
-      u.onend = finish;
-      u.onerror = finish;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      // Watchdog: Safari stalls long speech; resume() unsticks it. The
+      // disconnect watch stops everything if the socket dies mid-speech.
       const watch = setInterval(() => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          try { speechSynthesis.cancel(); } catch (e) { /* ignore */ }
-          finish();
-        }
-      }, 500);
+        try {
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            try { speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+            finish();
+          } else if (speechSynthesis.paused) {
+            speechSynthesis.resume();
+          }
+        } catch (e) { finish(); }
+      }, 1000);
+      const done2 = () => { clearInterval(watch); finish(); };
+      u.onend = done2;
+      u.onerror = done2;
       speechSynthesis.speak(u);
     } catch (e) { resolve(); }
   });
+}
+
+async function speakText(text) {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const voices = await ensureVoices();
+    const voice = pickVoice(voices);
+    const chunks = splitSpokenText(text, 220);
+    for (const chunk of chunks) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) break;
+      await speakChunk(chunk, voice);
+    }
+  } catch (e) { /* resolve silently — speech is a test aid, never fatal */ }
 }
 
 async function checkHealth() {
