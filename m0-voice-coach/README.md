@@ -106,10 +106,11 @@ screens them (most informative frames + plainly observable notes only —
 never emotion/confidence judgments) **in parallel** with the main text
 coach, and the notes merge into the feedback ("AI Coach + camera" badge).
 Either side can fail independently; frames are analyzed then discarded,
-never stored. Vision routes via OpenRouter (`COACH_VISION_MODEL`): free
-shared pools rate-limit often, so configure your own provider key or a paid
-model id for reliable visual notes — without one, attempts simply skip the
-camera path.
+never stored. Vision routes via OpenRouter (`COACH_VISION_MODEL`, default
+`google/gemma-4-31b-it:free`): free shared pools throttle transiently (one
+automatic retry, then clean fallback), so add your own provider key or a
+paid model id for reliable visual notes — without one, attempts simply skip
+the camera path.
 
 ## Docs referenced
 

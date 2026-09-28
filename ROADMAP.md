@@ -69,10 +69,10 @@ Full curriculum math, native apps, auth/payments, hand-rolled audio DSP.
 ## Multimodal ✅ BUILT, quota-blocked live (two-stage, honest)
 - Vision SCREENER + text coach run in parallel, notes merge; every failure
   combination tested and truthful. Verified with mocks + real API probes.
-- Live reality (Sep 2026): free Gemma/qwen/inclusionai routes all 429 or
-  retired from free tier — no free vision quota exists right now. Works the
-  moment a provider key (BYOK) or paid model id is configured; until then
-  attempts cleanly skip the camera path. Nothing faked, nothing half-broken.
+- Live reality (Sep 2026): free Gemma/qwen routes 429 persistently; default
+  is now `google/gemma-4-31b-it:free` (overridable) with one automatic 429
+  retry, then clean fallback. BYOK key or paid model id is the durable fix.
+  Works the moment quota exists; until then attempts skip the camera path.
 
 ## Standing rules
 I build, you test + paste logs. Deterministic metrics/compare stay; LLM

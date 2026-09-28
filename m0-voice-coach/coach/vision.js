@@ -12,7 +12,7 @@
 // judgments. Unusable frames → say so, no other notes.
 // Faces are analyzed then discarded: never stored client- or server-side.
 
-const DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b:free';
+const DEFAULT_VISION_MODEL = 'google/gemma-4-31b-it:free';
 
 function getVisionConfig(env) {
   const e = env || process.env;
@@ -78,23 +78,32 @@ async function screenFrames({ frames }, opts) {
   const fetchFn = o.fetchImpl || fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), o.timeoutMs || 90000);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const attemptFetch = () => fetchFn(config.baseURL + '/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + config.apiKey,
+      'HTTP-Referer': 'https://localhost:3000/',
+      'X-Title': 'Voice Coach M1',
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: buildScreenMessages(clean),
+      temperature: 0.2,
+      max_tokens: 1500,
+    }),
+    signal: controller.signal,
+  });
   try {
-    const res = await fetchFn(config.baseURL + '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + config.apiKey,
-        'HTTP-Referer': 'https://localhost:3000/',
-        'X-Title': 'Voice Coach M1',
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: buildScreenMessages(clean),
-        temperature: 0.2,
-        max_tokens: 1500,
-      }),
-      signal: controller.signal,
-    });
+    let res = await attemptFetch();
+    // Free shared pools throttle transiently (HTTP 429 explicitly says
+    // "retry shortly"): one retry after a short backoff, then give up
+    // cleanly into the fallback chain.
+    if (res.status === 429 && !o.skipRetry) {
+      await sleep(o.retryMs || 8000);
+      res = await attemptFetch();
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw new Error(`Vision provider HTTP ${res.status}: ${body.slice(0, 200)}`);

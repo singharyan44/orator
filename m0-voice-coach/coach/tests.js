@@ -448,7 +448,7 @@ if (fail) process.exit(1);
   // ---------- vision screener (two-stage multimodal) ----------
   {
     const vcDef = getVisionConfig({ OPENROUTER_API_KEY: 'k' });
-    ok('vision default model', vcDef && vcDef.name === 'openrouter' && vcDef.model === 'qwen/qwen3.8-27b:free', '');
+    ok('vision default model', vcDef && vcDef.name === 'openrouter' && vcDef.model === 'google/gemma-4-31b-it:free', '');
     const vcOver = getVisionConfig({ OPENROUTER_API_KEY: 'k', COACH_VISION_MODEL: 'x/y' });
     ok('vision model override', vcOver && vcOver.model === 'x/y', '');
     ok('vision unconfigured', getVisionConfig({}) === null, '');
@@ -506,6 +506,28 @@ if (fail) process.exit(1);
       await screenFrames({ frames: [] }, { env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: mockScreen, timeoutMs: 2000 });
     } catch (e) { threwScr = true; }
     ok('screen empty frames throws', threwScr);
+    const screenGood = { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ best_frames: [0], notes: ['Seated upright.'] }) } }] }) };
+    let retryCalls = 0;
+    const flaky429 = async () => {
+      retryCalls++;
+      if (retryCalls === 1) return { ok: false, status: 429, text: async () => 'throttled' };
+      return screenGood;
+    };
+    const scrRetry = await screenFrames(
+      { frames: ['data:image/jpeg;base64,AAA'] },
+      { env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: flaky429, timeoutMs: 5000, retryMs: 5 }
+    );
+    ok('screen retries 429 once', retryCalls === 2 && scrRetry.notes.length === 1, '');
+    let fatalCalls = 0;
+    const fatal500 = async () => { fatalCalls++; return { ok: false, status: 500, text: async () => 'boom' }; };
+    let threwFatal = false;
+    try {
+      await screenFrames(
+        { frames: ['data:image/jpeg;base64,AAA'] },
+        { env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: fatal500, timeoutMs: 2000, retryMs: 5 }
+      );
+    } catch (e) { threwFatal = true; }
+    ok('screen no retry on 500', threwFatal && fatalCalls === 1, '');
 
   console.log('VISION-RESULT pass=' + pass + ' fail=' + fail);
 
