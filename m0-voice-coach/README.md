@@ -99,6 +99,18 @@ update `COACH_MODEL` to match or remove it to use the provider default
 id fails cleanly into the Rules Coach fallback. Note that OpenRouter free
 models can be slow or temporarily unavailable; the fallback covers that too.
 
+## Camera (multimodal, optional)
+
+Enable the camera to attach up to 3 frames per attempt. A cheap vision model
+screens them (most informative frames + plainly observable notes only —
+never emotion/confidence judgments) **in parallel** with the main text
+coach, and the notes merge into the feedback ("AI Coach + camera" badge).
+Either side can fail independently; frames are analyzed then discarded,
+never stored. Vision routes via OpenRouter (`COACH_VISION_MODEL`): free
+shared pools rate-limit often, so configure your own provider key or a paid
+model id for reliable visual notes — without one, attempts simply skip the
+camera path.
+
 ## Docs referenced
 
 - https://www.assemblyai.com/docs/streaming (quickstart, temp tokens, WebSocket API)

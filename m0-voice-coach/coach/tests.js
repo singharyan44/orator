@@ -22,7 +22,7 @@ const { buildVoiceOpponentPrompt } = require('./voice-opponent');
 const { splitSpokenText } = require('../public/speech-out');
 const { formatElapsed, dayStats } = require('../public/stats');
 const { buildSessionText, verdictSummary } = require('../public/export-text');
-const { analyzeWithVision, buildVisionMessages, validateVisionFeedback, getVisionConfig } = require('./vision');
+const { screenFrames, buildScreenMessages, validateScreen, getVisionConfig } = require('./vision');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra) => {
@@ -445,52 +445,67 @@ if (fail) process.exit(1);
 
   console.log('DEBATE-RESULT pass=' + pass + ' fail=' + fail);
 
-  // ---------- vision (multimodal thin slice) ----------
+  // ---------- vision screener (two-stage multimodal) ----------
   {
     const vcDef = getVisionConfig({ OPENROUTER_API_KEY: 'k' });
-    ok('vision default model', vcDef && vcDef.name === 'openrouter' && vcDef.model === 'inclusionai/ling-3.0-flash-vl:free', '');
+    ok('vision default model', vcDef && vcDef.name === 'openrouter' && vcDef.model === 'qwen/qwen3.8-27b:free', '');
     const vcOver = getVisionConfig({ OPENROUTER_API_KEY: 'k', COACH_VISION_MODEL: 'x/y' });
     ok('vision model override', vcOver && vcOver.model === 'x/y', '');
     ok('vision unconfigured', getVisionConfig({}) === null, '');
-    const msgs = buildVisionMessages({
-      prompt: { title: 'T', objective: 'O' },
-      transcript: 'hello world',
-      metrics: { durationSec: 2, wordCount: 2, wpm: 60, fillerCount: 0, fillerRatePer100: 0, repeatCount: 0, sentenceCount: 1, fragmentCount: 0 },
-      previous: null,
-      frames: ['data:image/jpeg;base64,AAA', 'data:image/jpeg;base64,BBB'],
-    });
+    const msgs = buildScreenMessages(['data:image/jpeg;base64,AAA', 'data:image/jpeg;base64,BBB']);
     ok('vision messages carry frames', msgs.length === 1 && msgs[0].content.length === 3 && msgs[0].content[1].image_url.url.endsWith('AAA'), '');
-    const vv = validateVisionFeedback({ strengths: ['Steady.'], areas_to_improve: ['Pace.'], actionable_feedback: ['Slow down.'], retry_focus: { focus: 'Pace.', targets: ['wpm'], tip: 'Breathe.' }, visual_notes: ['Looking at camera in all frames.'] });
-    ok('vision valid passes', vv.visual_notes.length === 1 && vv.retry_focus.targets[0] === 'wpm', '');
-    const vvEmpty = validateVisionFeedback({ strengths: ['S.'], areas_to_improve: ['A.'], actionable_feedback: ['F.'], retry_focus: { focus: 'R.', targets: [], tip: '' } });
-    ok('vision notes optional', Array.isArray(vvEmpty.visual_notes) && vvEmpty.visual_notes.length === 0, '');
+    const vs = validateScreen({ best_frames: [0, 2], notes: ['Looking down in frame 0.'] }, 3);
+    ok('vision screen valid', vs.best_frames.length === 2 && vs.notes.length === 1, '');
+    const vsBadIdx = validateScreen({ best_frames: [0, 9, -1], notes: [] }, 2);
+    ok('vision bad indices filtered', vsBadIdx.best_frames.length === 1 && vsBadIdx.best_frames[0] === 0, '');
     let threwV = false;
-    try { validateVisionFeedback({ strengths: ['S.'], areas_to_improve: ['A.'], actionable_feedback: ['F.'], retry_focus: { focus: 'R.', targets: [], tip: '' }, visual_notes: ['a', 'b', 'c', 'd'] }); } catch (e) { threwV = true; }
+    try { validateScreen({ best_frames: [], notes: ['a', 'b', 'c', 'd'] }, 2); } catch (e) { threwV = true; }
     ok('vision notes capped', threwV);
+    let threwV2 = false;
+    try { validateScreen(null, 2); } catch (e) { threwV2 = true; }
+    ok('vision shape enforced', threwV2, '');
+    const coerced = validateScreen({ best_frames: 'x', notes: ['Note here.'] }, 2);
+    ok('vision bad shape coerced', coerced.best_frames.length === 0 && coerced.notes.length === 1, '');
 
-    // engine chain: vision → llm → rules
-    const vFake = { strengths: ['v'], areas_to_improve: [], actionable_feedback: [], retry_focus: { focus: 'f', targets: [], tip: '' }, visual_notes: ['Looking at camera.'] };
+    // engine: screener + text coach run in parallel, notes merge
+    const scrFake = { best_frames: [0], notes: ['Looking at camera.'] };
     const lFake = { strengths: ['l'], areas_to_improve: [], actionable_feedback: [], retry_focus: { focus: 'f', targets: [], tip: '' } };
     const rFake = { strengths: ['r'], areas_to_improve: [], actionable_feedback: [], retry_focus: { focus: 'f', targets: [], tip: '' } };
     let vCalls = 0, lCalls = 0;
-    const vOK = async () => { vCalls++; return vFake; };
+    const scrOK = async () => { vCalls++; return scrFake; };
     const lOK = async () => { lCalls++; return lFake; };
     const rSync = () => rFake;
     const boom = async () => { throw new Error('down'); };
     const frames = ['data:image/jpeg;base64,AAA'];
-    const eV = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: lOK, rulesAnalyze: rSync, visionAnalyze: vOK, frames });
-    ok('engine vision first', eV.coachSource === 'vision' && vCalls === 1 && lCalls === 0, '');
+    const eV = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: lOK, rulesAnalyze: rSync, visionScreen: scrOK, frames });
+    ok('engine parallel merge', eV.coachSource === 'vision' && eV.analysis.visual_notes.length === 1 && eV.analysis.strengths[0] === 'l' && vCalls === 1 && lCalls === 1, '');
+    const eVL = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: lOK, rulesAnalyze: rSync, visionScreen: boom, frames });
+    ok('engine vision fails silently', eVL.coachSource === 'llm' && eVL.fallback === false, '');
+    const eVR = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: boom, rulesAnalyze: rSync, visionScreen: scrOK, frames });
+    ok('engine text fails keeps visuals', eVR.coachSource === 'vision' && eVR.fallback === true && eVR.analysis.visual_notes.length === 1 && eVR.analysis.strengths[0] === 'r', '');
+    const eBoth = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: boom, rulesAnalyze: rSync, visionScreen: boom, frames });
+    ok('engine both fail rules', eBoth.coachSource === 'rules' && eBoth.fallback === true, '');
     vCalls = 0; lCalls = 0;
-    const eVL = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: lOK, rulesAnalyze: rSync, visionAnalyze: boom, frames });
-    ok('engine vision falls to llm', eVL.coachSource === 'llm' && lCalls === 1, '');
-    const eVR = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: boom, rulesAnalyze: rSync, visionAnalyze: boom, frames });
-    ok('engine vision+llm fall to rules', eVR.coachSource === 'rules' && eVR.fallback === true, '');
-    vCalls = 0; lCalls = 0;
-    const eNoFrames = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: lOK, rulesAnalyze: rSync, visionAnalyze: vOK, frames: [] });
+    const eNoFrames = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: lOK, rulesAnalyze: rSync, visionScreen: scrOK, frames: [] });
     ok('engine no frames skips vision', eNoFrames.coachSource === 'llm' && vCalls === 0 && lCalls === 1, '');
-    const eJunkFrames = await analyzeAttemptForSession({ engine: 'ai', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: lOK, rulesAnalyze: rSync, visionAnalyze: vOK, frames: ['not-an-image', 42, null] });
-    ok('engine junk frames skipped', eJunkFrames.coachSource === 'llm', '');
+    const eRules = await analyzeAttemptForSession({ engine: 'rules', prompt: {}, transcript: 't', metrics: {}, previous: null, llmAnalyze: lOK, rulesAnalyze: rSync, visionScreen: scrOK, frames });
+    ok('engine rules ignores vision', eRules.coachSource === 'rules' && vCalls === 0, '');
   }
+
+    const mockScreen = async () => ({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ best_frames: [1], notes: ['Looking down in frame 1.'] }) } }] }),
+    });
+    const scr = await screenFrames(
+      { frames: ['data:image/jpeg;base64,AAA', 'data:image/jpeg;base64,BBB'] },
+      { env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: mockScreen, timeoutMs: 2000 }
+    );
+    ok('screen mocked success', scr.best_frames[0] === 1 && scr.notes.length === 1 && scr.provider === 'openrouter', '');
+    let threwScr = false;
+    try {
+      await screenFrames({ frames: [] }, { env: { OPENROUTER_API_KEY: 'k' }, fetchImpl: mockScreen, timeoutMs: 2000 });
+    } catch (e) { threwScr = true; }
+    ok('screen empty frames throws', threwScr);
 
   console.log('VISION-RESULT pass=' + pass + ' fail=' + fail);
 

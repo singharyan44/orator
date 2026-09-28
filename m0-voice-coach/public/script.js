@@ -842,7 +842,7 @@ async function submitFinishedAttempt({ transcript, turnCount, durationMs }) {
         retry_focus: data.analysis.retry_focus,
       },
     };
-    renderAnalysis(data.analysis, data.attempt, data.coachSource, data.requestedEngine || coachEngine);
+    renderAnalysis(data.analysis, data.attempt, data.coachSource, data.requestedEngine || coachEngine, data.fallback === true);
     const history = saveAttemptToHistory({
       promptTitle: promptTitleEl.textContent,
       transcript,
@@ -891,17 +891,19 @@ newPromptBtn.addEventListener('click', async () => {
   }
 });
 
-function renderAnalysis(analysis, attempt, coachSource, requestedEngine) {
+function renderAnalysis(analysis, attempt, coachSource, requestedEngine, fallback) {
   const m = analysis.metrics;
   const li = (items) => items.map((t) => '<li>' + escapeHtml(t) + '</li>').join('');
   const pace = m.wpm == null ? 'n/a' : m.wpm + ' wpm';
-  // Requested engine (the user's choice, associated with this attempt) vs the
-  // actual source (truthful: fallback is never presented as AI output).
+  // Requested engine (the user's choice) vs the actual source (truthful in
+  // every combination, including vision-notes-on-rules-text).
   const requested = requestedEngine === 'rules' ? 'Rules Coach' : 'AI Coach';
   const badge = coachSource === 'llm'
     ? '<span class="hint">AI Coach</span>'
     : (coachSource === 'vision'
-      ? '<span class="hint">AI Coach + camera</span>'
+      ? (fallback
+        ? '<span class="hint">Rules Coach + camera notes</span>'
+        : '<span class="hint">AI Coach + camera</span>')
       : (requestedEngine === 'rules'
         ? '<span class="hint">Rules Coach</span>'
         : '<span class="hint">Rules Coach — AI fallback</span>'));

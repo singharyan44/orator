@@ -66,14 +66,13 @@ or visual polish. Submit at end of day. 🎉
 ## Explicitly OUT
 Full curriculum math, native apps, auth/payments, hand-rolled audio DSP.
 
-## Multimodal ✅ BUILT (spike passed → thin slice, same day)
-- Spike: free OpenRouter vision model accepted frames and perceived correctly
-  (needed a bigger token budget — reasoning-style outputs truncate otherwise).
-- Opt-in camera, 3 frames/attempt (start/finish/submit), analyzed then
-  discarded — never stored client- or server-side. Fallback chain
-  vision → text LLM → rules; badge "AI Coach + camera".
-- Visual notes constrained to observable facts by prompt + validation.
-- Real-face quality still needs your camera to judge (untestable headless).
+## Multimodal ✅ BUILT, quota-blocked live (two-stage, honest)
+- Vision SCREENER + text coach run in parallel, notes merge; every failure
+  combination tested and truthful. Verified with mocks + real API probes.
+- Live reality (Sep 2026): free Gemma/qwen/inclusionai routes all 429 or
+  retired from free tier — no free vision quota exists right now. Works the
+  moment a provider key (BYOK) or paid model id is configured; until then
+  attempts cleanly skip the camera path. Nothing faked, nothing half-broken.
 
 ## Standing rules
 I build, you test + paste logs. Deterministic metrics/compare stay; LLM

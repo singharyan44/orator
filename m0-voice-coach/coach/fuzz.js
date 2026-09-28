@@ -9,7 +9,7 @@ const { assignNext } = require('./assign');
 const { validateOpponent, validateDiagnosis, diagnoseRules, stockChallenge } = require('./debate');
 const { validateQuestion, validateInterviewDiagnosis, diagnoseInterviewRules, stockFollowup } = require('./interview');
 const { validateFeedback } = require('./llm-analyze');
-const { validateVisionFeedback } = require('./vision');
+const { validateScreen } = require('./vision');
 const { buildVoiceOpponentPrompt } = require('./voice-opponent');
 const { buildHealth } = require('./health');
 const { buildSessionText } = require('../public/export-text');
@@ -51,7 +51,7 @@ for (const p of POISON) {
   attempt('diagnoseInterviewRules', () => diagnoseInterviewRules({ answers: p, metricsList: p }));
   attempt('stockFollowup', () => stockFollowup(p));
   attempt('validateFeedback', () => validateFeedback(p));
-  attempt('validateVisionFeedback', () => validateVisionFeedback(p));
+  attempt('validateScreen', () => validateScreen(p, 3));
   attempt('voicePrompt', () => buildVoiceOpponentPrompt(p, p));
   attempt('health', () => buildHealth(p));
   attempt('exportText', () => buildSessionText(p));

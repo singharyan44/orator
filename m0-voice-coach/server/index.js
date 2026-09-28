@@ -6,7 +6,7 @@ const { createSession, getSession, addAttempt, makeAttempt } = require('../coach
 const { computeMetrics } = require('../coach/metrics');
 const { analyzeAttempt } = require('../coach/analyze');
 const { analyzeWithLLM } = require('../coach/llm-analyze');
-const { analyzeWithVision } = require('../coach/vision');
+const { screenFrames } = require('../coach/vision');
 const { getProviderConfig } = require('../coach/llm/provider');
 const { analyzeAttemptForSession } = require('../coach/coach-engine');
 const { buildHealth } = require('../coach/health');
@@ -237,7 +237,7 @@ app.post('/api/sessions/:id/attempts', async (req, res) => {
     previous: prev,
     llmAnalyze: analyzeWithLLM,
     rulesAnalyze: analyzeAttempt,
-    visionAnalyze: analyzeWithVision,
+    visionScreen: screenFrames,
     frames: req.body && Array.isArray(req.body.frames) ? req.body.frames.slice(0, 4) : [],
   });
   if (routed.fallback) {
@@ -260,7 +260,7 @@ app.post('/api/sessions/:id/attempts', async (req, res) => {
     comparison = compareAttempts({ ...prev.analysis, metrics: prev.metrics }, analysis, prev.analysis.retry_focus);
   }
 
-  res.json({ attempt, analysis, coachSource, requestedEngine: routed.requested, comparison });
+  res.json({ attempt, analysis, coachSource, requestedEngine: routed.requested, comparison, fallback: routed.fallback === true });
 });
 
 // ---------------- Speech attempts + comparison ----------------
