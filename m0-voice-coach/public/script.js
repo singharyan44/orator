@@ -527,6 +527,10 @@ function startOverlayLoop() {
         return;
       }
       faceStatusEl.textContent = 'Face: not detected — move into frame and light your face.';
+      try {
+        const d = getLastEstimateDiag();
+        if (d) faceStatusEl.textContent += ' [diag: ' + JSON.stringify(d) + ']';
+      } catch (e) { /* diag display must never break status */ }
     } catch (e) {
       faceStatusEl.textContent = 'Detection error: ' + e.message;
     } finally {
@@ -565,6 +569,11 @@ async function testVisionPipeline() {
   try {
     await ensureEstimator();
     const loadMs = Date.now() - t0;
+    let inv = 'n/a';
+    try {
+      const info = await describeEstimator();
+      inv = 'ctor=' + info.ctor + ' detect=' + info.hasDetect + ' detectForVideo=' + info.hasDetectForVideo;
+    } catch (e) { inv = 'inventory-failed: ' + e.message; }
     const native = (typeof estimateBox === 'function');
     let nativeSupport = 'unknown';
     try { nativeSupport = String(nativeFaceAvailable()); } catch (e) { nativeSupport = 'check-failed'; }
@@ -586,6 +595,7 @@ async function testVisionPipeline() {
     } catch (e) { blaze = 'error: ' + e.message; }
     const vw = (typeof cameraPreview !== 'undefined' && cameraPreview.videoWidth) || 0;
     say('Pipeline OK (load ' + loadMs + 'ms, detect ' + detectMs + 'ms, ' +
+      'estimator: ' + inv + ', ' +
       'pattern landmarks: ' + (obs.face ? 'face?! gaze ' + obs.yaw + '/' + obs.pitch : 'no face — expected for a drawing') + ', ' +
       'pattern blazeface: ' + blaze + ', ' +
       'native detector: ' + nativeSupport + ', ' +

@@ -123,11 +123,25 @@ async function estimateVideo(source) {
   try {
     if (source && source.tagName === 'VIDEO') {
       const snap = snapshotVideo(source, 640);
-      if (!snap) return null;
+      if (!snap) {
+        if (VISION_DEBUG) lastEstimateDiag = { snap: null, note: 'no-snapshot' };
+        return null;
+      }
       target = snap;
+      if (VISION_DEBUG) {
+        const st = canvasStats(snap);
+        lastEstimateDiag = { snap: st.w + 'x' + st.h + ' μ' + st.mean + ' var' + st.variance, faces: -1 };
+      }
     }
-    return extractFaces(await lm.detect(target));
+    const res = await lm.detect(target);
+    const found = extractFaces(res);
+    if (VISION_DEBUG && lastEstimateDiag && typeof lastEstimateDiag === 'object') {
+      lastEstimateDiag.faces = found ? 1 : 0;
+      lastEstimateDiag.keys = res && typeof res === 'object' ? Object.keys(res).join(',') : typeof res;
+    }
+    return found;
   } catch (e) {
+    if (VISION_DEBUG) lastEstimateDiag = { error: String((e && e.message) || e) };
     if (source && source.tagName === 'VIDEO') return null;
     throw e;
   }
@@ -176,7 +190,53 @@ async function detectBlaze(canvas) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { faceObservation, summarizeObservations, ensureEstimator, estimateVideo, estimateBox, nativeFaceAvailable, snapshotVideo, ensureBlaze, detectBlaze, MP, IDX };
+  module.exports = { faceObservation, summarizeObservations, ensureEstimator, estimateVideo, estimateBox, nativeFaceAvailable, snapshotVideo, ensureBlaze, detectBlaze, canvasStats, getLastEstimateDiag, describeEstimator, MP, IDX };
+}
+
+// ---- TEMPORARY deep diagnostics (VISION_DEBUG) ----
+// Remove once face detection is confirmed working live. When true, every
+// estimate records pixel stats + timings + model identity for copy-paste.
+const VISION_DEBUG = true;
+let lastEstimateDiag = null;
+
+function getLastEstimateDiag() {
+  return lastEstimateDiag;
+}
+
+// Mean brightness + variance of a canvas (0-255). A near-black or
+// near-zero-variance snapshot means the detector received garbage,
+// no matter what the preview element appears to show.
+function canvasStats(canvas) {
+  try {
+    const w = canvas.width, h = canvas.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const data = ctx.getImageData(0, 0, w, h).data;
+    let sum = 0, sum2 = 0;
+    const n = w * h;
+    const step = Math.max(1, Math.floor(n / 2000));
+    let count = 0;
+    for (let i = 0; i < n; i += step) {
+      const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+      const v = (r + g + b) / 3;
+      sum += v; sum2 += v * v; count++;
+    }
+    const mean = sum / count;
+    return { w, h, mean: Math.round(mean), variance: Math.round(sum2 / count - mean * mean) };
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  }
+}
+
+// Model inventory: which class was actually constructed and which detect
+// methods exist on it. Catches bundle-shape surprises (e.g. a build where
+// detectForVideo is missing).
+async function describeEstimator() {
+  const lm = await ensureEstimator();
+  return {
+    ctor: (lm && lm.constructor && lm.constructor.name) || typeof lm,
+    hasDetect: typeof (lm && lm.detect) === 'function',
+    hasDetectForVideo: typeof (lm && lm.detectForVideo) === 'function',
+  };
 }
 
 // Snapshot a <video> to an offscreen canvas (capped width). Returns the
