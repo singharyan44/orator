@@ -388,6 +388,15 @@ cameraToggleBtn.addEventListener('click', async () => {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 } } });
     cameraPreview.srcObject = cameraStream;
     cameraPreview.hidden = false;
+    // A video element with a stream source does NOT auto-play reliably
+    // (Safari especially): without play() it stays black AND videoWidth
+    // stays 0, which silently kills frame capture too.
+    try {
+      await cameraPreview.play();
+    } catch (e) {
+      cameraHintEl.textContent = 'Camera preview could not start playing: ' + e.message;
+      log('Camera play error: ' + e.message);
+    }
     cameraToggleBtn.textContent = 'Disable camera';
     log('Camera on — frames are analyzed then discarded, never stored');
   } catch (e) {
@@ -819,8 +828,7 @@ async function submitFinishedAttempt({ transcript, turnCount, durationMs }) {
   if (f) attemptFrames.push(f);
   // Frames ride along (max 3, never stored client-side either — lastAttempt
   // and history records below deliberately exclude them).
-  const frames = attemptFrames.filter(Boolean).slice(-3);
-  try {
+  const frames = attemptFrames.filter(Boolean).slice(-3);  try {
     const res = await fetch('/api/sessions/' + sessionId + '/attempts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -842,7 +850,7 @@ async function submitFinishedAttempt({ transcript, turnCount, durationMs }) {
         retry_focus: data.analysis.retry_focus,
       },
     };
-    renderAnalysis(data.analysis, data.attempt, data.coachSource, data.requestedEngine || coachEngine, data.fallback === true);
+    renderAnalysis(data.analysis, data.attempt, data.coachSource, data.requestedEngine || coachEngine, data.fallback === true, frames.length);
     const history = saveAttemptToHistory({
       promptTitle: promptTitleEl.textContent,
       transcript,
@@ -891,7 +899,7 @@ newPromptBtn.addEventListener('click', async () => {
   }
 });
 
-function renderAnalysis(analysis, attempt, coachSource, requestedEngine, fallback) {
+function renderAnalysis(analysis, attempt, coachSource, requestedEngine, fallback, cameraFrames) {
   const m = analysis.metrics;
   const li = (items) => items.map((t) => '<li>' + escapeHtml(t) + '</li>').join('');
   const pace = m.wpm == null ? 'n/a' : m.wpm + ' wpm';
@@ -923,6 +931,7 @@ function renderAnalysis(analysis, attempt, coachSource, requestedEngine, fallbac
     (analysis.areas_to_improve.length ? '<h3>Work on</h3><ul>' + li(analysis.areas_to_improve) + '</ul>' : '') +
     (analysis.actionable_feedback.length ? '<h3>Do next time</h3><ul>' + li(analysis.actionable_feedback) + '</ul>' : '') +
     ((analysis.visual_notes && analysis.visual_notes.length) ? '<h3>On camera</h3><ul>' + li(analysis.visual_notes) + '</ul>' : '') +
+    ((cameraFrames > 0 && !(analysis.visual_notes && analysis.visual_notes.length)) ? '<div class="hint">Camera was on (' + cameraFrames + ' frame' + (cameraFrames === 1 ? '' : 's') + ' sent) but the vision model did not respond — free quota is often dry; text feedback unaffected.</div>' : '') +
     '<div class="retry-focus"><strong>Retry focus:</strong> ' + escapeHtml(analysis.retry_focus.focus) +
     '<br><span class="hint">' + escapeHtml(analysis.retry_focus.tip) + '</span></div>' +
     '</div>';
