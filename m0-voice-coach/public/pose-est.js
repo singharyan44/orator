@@ -92,6 +92,10 @@ async function ensureEstimator() {
       baseOptions: { modelAssetPath: MP.FACE_MODEL_URL },
       runningMode: 'IMAGE',
       numFaces: 1,
+      // Lowered from the 0.5 default: dim rooms, small faces, and glasses
+      // sit near the default cutoff. False positives are cheap here (a
+      // stray box is visible on the overlay); misses are expensive.
+      minFaceDetectionConfidence: 0.3,
     });
     return lm;
   })().catch((e) => {
@@ -118,7 +122,7 @@ async function estimateVideo(source) {
   try {
     if (source && source.tagName === 'VIDEO') {
       if (!source.videoWidth || (typeof source.readyState === 'number' && source.readyState < 2)) return null;
-      const scale = Math.min(1, 480 / source.videoWidth);
+      const scale = Math.min(1, 640 / source.videoWidth);
       const c = document.createElement('canvas');
       c.width = Math.max(2, Math.round(source.videoWidth * scale));
       c.height = Math.max(2, Math.round(source.videoHeight * scale));
