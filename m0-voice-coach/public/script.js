@@ -498,7 +498,22 @@ function startOverlayLoop() {
           g.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
         }
         const obs = faceObservation(lm);
-        faceStatusEl.textContent = 'Face: yes · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed') + ' (' + ms + 'ms)';
+        faceStatusEl.textContent = 'Face: yes (landmarks) · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed') + ' (' + ms + 'ms)';
+        return;
+      }
+      // Landmarker saw nothing: second opinion from BlazeFace on the same
+      // snapshot. Different model, same pixels — disagreement isolates the
+      // cause (model setup vs. input/lighting).
+      let blaze = null;
+      try {
+        const snap = snapshotVideo(cameraPreview);
+        if (snap) blaze = await detectBlaze(snap);
+      } catch (e) { log('BlazeFace check failed: ' + e.message); }
+      if (blaze) {
+        g.strokeStyle = '#facc15';
+        g.lineWidth = 2;
+        g.strokeRect(blaze.x * w, blaze.y * h, blaze.width * w, blaze.height * h);
+        faceStatusEl.textContent = 'Face: yes (BlazeFace — landmarker missed it) (' + ms + 'ms)';
         return;
       }
       // MediaPipe saw nothing: try the native OS detector (presence only).
@@ -531,6 +546,10 @@ async function observePreview() {
     if (lm) return faceObservation(lm);
     const box = await estimateBox(cameraPreview);
     if (box) return { face: true, coarse: true, yaw: 'center', pitch: 'level', eyesOpen: true };
+    try {
+      const snap = snapshotVideo(cameraPreview);
+      if (snap && await detectBlaze(snap)) return { face: true, coarse: true, yaw: 'center', pitch: 'level', eyesOpen: true };
+    } catch (e) { /* BlazeFace is best-effort here */ }
     return { face: false };
   } catch (e) { return null; }
 }
@@ -560,9 +579,15 @@ async function testVisionPipeline() {
     const lm = await estimateVideo(c);
     const detectMs = Date.now() - d0;
     const obs = lm ? faceObservation(lm) : { face: false };
+    let blaze = 'untested';
+    try {
+      const b = await detectBlaze(c);
+      blaze = b ? 'face?!' : 'no face';
+    } catch (e) { blaze = 'error: ' + e.message; }
     const vw = (typeof cameraPreview !== 'undefined' && cameraPreview.videoWidth) || 0;
     say('Pipeline OK (load ' + loadMs + 'ms, detect ' + detectMs + 'ms, ' +
-      'pattern: ' + (obs.face ? 'face?! gaze ' + obs.yaw + '/' + obs.pitch : 'no face — expected for a drawing') + ', ' +
+      'pattern landmarks: ' + (obs.face ? 'face?! gaze ' + obs.yaw + '/' + obs.pitch : 'no face — expected for a drawing') + ', ' +
+      'pattern blazeface: ' + blaze + ', ' +
       'native detector: ' + nativeSupport + ', ' +
       'video: ' + vw + 'px' + (cameraStream ? '' : ' (camera off)') + '). ' +
       'For live results watch the dots + Face line above.');

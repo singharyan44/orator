@@ -18,6 +18,7 @@ const MP = {
   BUNDLE_URL: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.20/vision_bundle.mjs',
   WASM_URL: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.20/wasm',
   FACE_MODEL_URL: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+  BLAZE_URL: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
 };
 
 // MediaPipe face-mesh indices (478-point model, normalized 0..1 coords).
@@ -132,8 +133,50 @@ async function estimateVideo(source) {
   }
 }
 
+// ---- BlazeFace short-range: independent second opinion ----
+// A different model answering the same question isolates landmarker-file
+// issues from environmental ones: if BlazeFace sees a face the landmarker
+// misses, the landmarker setup is at fault; if both miss, suspect the
+// input/lighting. Bounding box only (presence + rough position).
+let blazePromise = null;
+
+async function ensureBlaze() {
+  if (blazePromise) return blazePromise;
+  blazePromise = (async () => {
+    const mod = await import(/* webpackIgnore: true */ MP.BUNDLE_URL);
+    const vision = await mod.FilesetResolver.forVisionTasks(MP.WASM_URL);
+    const det = await mod.FaceDetector.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: MP.BLAZE_URL },
+      runningMode: 'IMAGE',
+      minDetectionConfidence: 0.3,
+    });
+    return det;
+  })().catch((e) => {
+    blazePromise = null;
+    throw e;
+  });
+  return blazePromise;
+}
+
+// Returns a normalized {x,y,width,height} box (0..1) or null. Throws on
+// load failure so callers can report it; returns null when simply empty.
+async function detectBlaze(canvas) {
+  const det = await ensureBlaze();
+  const res = await det.detect(canvas);
+  const list = res && res.detections;
+  if (!list || !list.length || !list[0].boundingBox) return null;
+  const b = list[0].boundingBox;
+  const w = canvas.width || 1, h = canvas.height || 1;
+  return {
+    x: (b.originX || 0) / w,
+    y: (b.originY || 0) / h,
+    width: (b.width || 0) / w,
+    height: (b.height || 0) / h,
+  };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { faceObservation, summarizeObservations, ensureEstimator, estimateVideo, estimateBox, nativeFaceAvailable, snapshotVideo, MP, IDX };
+  module.exports = { faceObservation, summarizeObservations, ensureEstimator, estimateVideo, estimateBox, nativeFaceAvailable, snapshotVideo, ensureBlaze, detectBlaze, MP, IDX };
 }
 
 // Snapshot a <video> to an offscreen canvas (capped width). Returns the
