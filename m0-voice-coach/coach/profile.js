@@ -16,20 +16,22 @@ const SKILLS = [
   { key: 'structure', label: 'Complete sentences' },
   { key: 'substance', label: 'Full answers' },
   { key: 'pauses', label: 'No hesitation pauses' },
+  { key: 'presence', label: 'Camera presence' },
 ];
 
 // Per-attempt skill verdicts from measured metrics only.
 // Returns { pace: true|false|null, ... } (null = not measurable).
 function skillVerdicts(m) {
-  if (!m) return { pace: null, fillers: null, repeats: null, structure: null, substance: null, pauses: null };
+  if (!m) return { pace: null, fillers: null, repeats: null, structure: null, substance: null, pauses: null, presence: null };
   return {
     pace: m.wpm == null ? null : (m.wpm >= 100 && m.wpm <= 170),
     fillers: (m.fillerRatePer100 || 0) <= 3,
     repeats: (m.repeatCount || 0) === 0,
     structure: (m.fragmentCount || 0) === 0 && (m.longSentenceCount || 0) === 0,
     substance: (m.wordCount || 0) >= 20,
-    // Unknown (not bad) when no word timings existed for the attempt.
+    // Unknown (not bad) when no word timings / camera data existed.
     pauses: m.pausesMeasured ? (m.pauseCount || 0) === 0 : null,
+    presence: m.visualMeasured && m.visual ? (m.visual.faces === m.visual.frames && m.visual.frames > 0) : null,
   };
 }
 

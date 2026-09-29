@@ -58,7 +58,7 @@ function splitSentences(text) {
     }));
 }
 
-function computeMetrics({ transcript, durationMs, turnCount, words }) {
+function computeMetrics({ transcript, durationMs, turnCount, words, visual }) {
   const text = (transcript || '').trim();
   const lower = text.toLowerCase();
   const rawTokens = text.split(/\s+/).filter(Boolean);
@@ -105,6 +105,10 @@ function computeMetrics({ transcript, durationMs, turnCount, words }) {
   const safeTurnCount = Number.isFinite(turnCount) && turnCount > 0 ? Math.floor(turnCount) : 0;
   const avgWordsPerTurn = safeTurnCount > 0 ? Math.round((wordCount / safeTurnCount) * 10) / 10 : 0;
 
+  // On-device visual measurements (pose-est.js landmark geometry), attached
+  // when the browser sends them. Sanitized: counts clamped to frames.
+  const vis = sanitizeVisual(visual);
+
   // Measured hesitation pauses from AssemblyAI word timings (not guessed).
   const wordGroups = Array.isArray(words) ? words : [];
   const pauses = pauseStats(wordGroups);
@@ -131,7 +135,31 @@ function computeMetrics({ transcript, durationMs, turnCount, words }) {
     // False for old records without word timings: callers must not present
     // pause verdicts as measured when no timing data existed.
     pausesMeasured: wordGroups.length > 0,
+    visual: vis,
+    // Same honesty rule as pauses: no landmark data → no visual claims.
+    visualMeasured: vis !== null,
   };
 }
 
-module.exports = { computeMetrics, FILLERS, PAUSE_GAP_MS };
+// Sanitize client-computed visual summaries: integers, counts clamped to
+// the frame count, null when unusable. Never throws.
+function sanitizeVisual(v) {
+  try {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    const n = (x) => (Number.isFinite(x) ? Math.max(0, Math.floor(x)) : 0);
+    const frames = Math.min(10, n(v.frames));
+    if (!frames) return null;
+    const clamp = (x) => Math.min(frames, n(x));
+    return {
+      frames,
+      faces: clamp(v.faces),
+      lookingDown: clamp(v.lookingDown),
+      headTurned: clamp(v.headTurned),
+      eyesClosed: clamp(v.eyesClosed),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+module.exports = { computeMetrics, sanitizeVisual, FILLERS, PAUSE_GAP_MS };

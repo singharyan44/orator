@@ -35,6 +35,18 @@
       <button id="interviewTabBtn" class="btn btn-small">Interview Coach</button>
     </div>
 
+    <section class="panel">
+      <h2>Devices</h2>
+      <div class="row engine-row">
+        <span class="engine-label">Mic</span>
+        <select id="micSelect"></select>
+        <span class="engine-label">Camera</span>
+        <select id="camSelect"></select>
+        <button id="refreshDevicesBtn" class="btn btn-small">Refresh devices</button>
+      </div>
+      <div id="devicesHint" class="hint">Pick microphone/camera, or leave on default. Choices are remembered on this device.</div>
+    </section>
+
     <div id="speechMode">
     <section class="panel prompt-panel">
       <h2>Practice prompt</h2>
@@ -69,9 +81,11 @@
       </div>
       <div class="row">
         <button id="cameraToggleBtn" class="btn btn-small">Enable camera</button>
+        <button id="visionTestBtn" class="btn btn-small">Test vision pipeline</button>
       </div>
       <video id="cameraPreview" muted playsinline hidden width="160"></video>
-      <div id="cameraHint" class="hint">Optional camera: up to 3 frames per attempt are analyzed, then discarded — never stored.</div>
+      <div id="cameraHint" class="hint">Optional camera: face measurements per attempt are analyzed on-device, then discarded — never stored.</div>
+      <div id="visionTestHint" class="hint"></div>
       <div id="attemptHint" class="hint">Connect, then press “Start attempt” and speak.</div>
     </section>
 
@@ -216,6 +230,7 @@
   <script src="export-text.js"></script>
   <script src="stats.js"></script>
   <script src="speech-out.js"></script>
+  <script src="pose-est.js"></script>
   <script src="script.js"></script>
   <script src="debate.js"></script>
   <script src="voice-debate.js"></script>

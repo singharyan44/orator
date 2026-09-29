@@ -99,18 +99,15 @@ update `COACH_MODEL` to match or remove it to use the provider default
 id fails cleanly into the Rules Coach fallback. Note that OpenRouter free
 models can be slow or temporarily unavailable; the fallback covers that too.
 
-## Camera (multimodal, optional)
+## Camera (on-device measurement, optional)
 
-Enable the camera to attach up to 3 frames per attempt. A cheap vision model
-screens them (most informative frames + plainly observable notes only —
-never emotion/confidence judgments) **in parallel** with the main text
-coach, and the notes merge into the feedback ("AI Coach + camera" badge).
-Either side can fail independently; frames are analyzed then discarded,
-never stored. Vision routes via OpenRouter (`COACH_VISION_MODEL`, default
-`google/gemma-4-31b-it:free`): free shared pools throttle transiently (one
-automatic retry, then clean fallback), so add your own provider key or a
-paid model id for reliable visual notes — without one, attempts simply skip
-the camera path.
+Enable the camera to measure gaze and presence per attempt with MediaPipe
+face landmarks, running 100% in your browser: no API key, no quota, no
+uploads. Each attempt records head direction (center/left/right),
+gaze level, and eye openness; the summary (counts only, never images) joins
+the attempt metrics and powers feedback like "looking down in 2 of 3
+frames". Devices panel lets you pick microphone and camera; the vision
+self-test button verifies the models load without needing a face.
 
 ## Docs referenced
 

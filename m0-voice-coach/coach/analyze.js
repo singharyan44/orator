@@ -108,6 +108,22 @@ function analyzeAttempt({ metrics }) {
     }
   }
 
+  // ---- Camera presence (measured landmark geometry, not guessed) ----
+  const vis = m.visualMeasured ? m.visual : null;
+  if (vis) {
+    if (vis.faces < vis.frames) {
+      observations.push({ type: 'measured', text: `Your face was visible in ${vis.faces} of ${vis.frames} camera frames — check framing so the coach can see you.` });
+    } else if (vis.frames >= 2 && vis.lookingDown === 0 && vis.headTurned === 0) {
+      push(strengths, 'Steady camera presence — facing forward in every frame.');
+    }
+    if (vis.lookingDown >= 2) {
+      push(areas, `Looking down in ${vis.lookingDown} of ${vis.frames} frames — notes or screen? Lift your gaze to the camera.`);
+      push(actions, 'Put notes at camera height and glance, don’t read — return your eyes to the lens each sentence.');
+    } else if (vis.eyesClosed >= 2) {
+      observations.push({ type: 'measured', text: `Eyes mostly closed in ${vis.eyesClosed} of ${vis.frames} frames — often means reading down, not blinking.` });
+    }
+  }
+
   // ---- Retry focus: single priority, highest-signal issue first ----
   let retryFocus;
   if (m.wordCount < 8) {
@@ -133,6 +149,12 @@ function analyzeAttempt({ metrics }) {
       focus: 'Zero repeated words — push forward through stumbles.',
       targets: ['repeatCount'],
       tip: 'Never go back to re-say a word; keep moving to the next one.',
+    };
+  } else if (m.visualMeasured && m.visual.lookingDown >= 2) {
+    retryFocus = {
+      focus: 'Eyes up — stop reading down mid-speech.',
+      targets: [],
+      tip: 'Notes at camera height; return your gaze to the lens every sentence.',
     };
   } else if (m.pausesMeasured && (m.pauseCount || 0) >= 3) {
     retryFocus = {

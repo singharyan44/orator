@@ -6,7 +6,6 @@ const { createSession, getSession, addAttempt, makeAttempt } = require('../coach
 const { computeMetrics } = require('../coach/metrics');
 const { analyzeAttempt } = require('../coach/analyze');
 const { analyzeWithLLM } = require('../coach/llm-analyze');
-const { screenFrames } = require('../coach/vision');
 const { getProviderConfig } = require('../coach/llm/provider');
 const { analyzeAttemptForSession } = require('../coach/coach-engine');
 const { buildHealth } = require('../coach/health');
@@ -30,8 +29,8 @@ if (!API_KEY) {
 }
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
-// 2 MB: attempt posts can carry up to 3 camera frames (data URLs).
-// Default 100 KB would 413 every camera attempt.
+// 2 MB: attempt posts can carry word-timing arrays and histories.
+// Default 100 KB would 413 larger attempts.
 app.use(express.json({ limit: '2mb' }));
 
 // Streaming token endpoint (Universal-3 Pro Streaming)
@@ -193,6 +192,7 @@ app.post('/api/sessions/:id/attempts', async (req, res) => {
     durationMs: Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0,
     turnCount: Number.isFinite(turnCount) && turnCount >= 0 ? turnCount : 0,
     words: Array.isArray(req.body.words) ? req.body.words.slice(0, 50) : [],
+    visual: req.body && typeof req.body.visual === 'object' ? req.body.visual : null,
   });
 
   // Retry context: prefer the client-sent previous (works across serverless
@@ -237,8 +237,6 @@ app.post('/api/sessions/:id/attempts', async (req, res) => {
     previous: prev,
     llmAnalyze: analyzeWithLLM,
     rulesAnalyze: analyzeAttempt,
-    visionScreen: screenFrames,
-    frames: req.body && Array.isArray(req.body.frames) ? req.body.frames.slice(0, 4) : [],
   });
   if (routed.fallback) {
     // Server-side log keeps the detail; the client gets a generic truthful flag.

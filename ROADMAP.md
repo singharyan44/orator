@@ -66,13 +66,12 @@ or visual polish. Submit at end of day. 🎉
 ## Explicitly OUT
 Full curriculum math, native apps, auth/payments, hand-rolled audio DSP.
 
-## Multimodal ✅ BUILT, quota-blocked live (two-stage, honest)
-- Vision SCREENER + text coach run in parallel, notes merge; every failure
-  combination tested and truthful. Verified with mocks + real API probes.
-- Live reality (Sep 2026): free Gemma/qwen routes 429 persistently; default
-  is now `google/gemma-4-31b-it:free` (overridable) with one automatic 429
-  retry, then clean fallback. BYOK key or paid model id is the durable fix.
-  Works the moment quota exists; until then attempts skip the camera path.
+## Multimodal ✅ SHIPPED as on-device measurement (better than planned)
+- Replaced the OpenRouter vision screener (free quota permanently dry)
+  with MediaPipe face landmarks running 100% in-browser: gaze direction,
+  eye openness, presence — measured geometry, not model opinion.
+- No key, no quota, no uploads; mic/camera device pickers; vision
+  self-test button; presence skill in profile; drill fallback routing.
 
 ## Standing rules
 I build, you test + paste logs. Deterministic metrics/compare stay; LLM

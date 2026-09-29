@@ -176,6 +176,10 @@ async function startVoiceAudio() {
   let micStream = null;
   if (typeof stream !== 'undefined' && stream) {
     micStream = stream;
+  } else if (typeof getMicStream === 'function') {
+    micStream = await getMicStream();
+    voiceOwnsMic = true;
+    voiceMicStream = micStream;
   } else {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false } });
     voiceOwnsMic = true;

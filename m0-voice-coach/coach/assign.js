@@ -18,6 +18,7 @@ const SKILL_ISSUES = {
   structure: 'Sentence structure',
   substance: 'Answer fullness',
   pauses: 'Hesitation pauses',
+  presence: 'Camera presence',
 };
 
 function promptsFor(skillKey, excludeId) {

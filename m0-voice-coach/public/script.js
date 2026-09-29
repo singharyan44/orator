@@ -161,7 +161,7 @@ function startMicrophone() {
   }
   audioCtx.resume().catch(() => {});
 
-  navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false } })
+  getMicStream()
     .then(async (s) => {
       stream = s;
       source = audioCtx.createMediaStreamSource(stream);
@@ -371,9 +371,12 @@ const cameraToggleBtn = document.getElementById('cameraToggleBtn');
 const cameraPreview = document.getElementById('cameraPreview');
 const cameraHintEl = document.getElementById('cameraHint');
 let cameraStream = null;
-let attemptFrames = [];
+// On-device visual observations for the current attempt (never images —
+// only small {face,yaw,pitch,eyesOpen} objects; nothing leaves the browser
+// except the aggregated summary).
+let attemptVisualObs = [];
 
-// ---- Multimodal thin slice: opt-in camera, 3 frames per attempt ----
+// ---- Opt-in camera: on-device landmark measurement per attempt ----
 cameraToggleBtn.addEventListener('click', async () => {
   if (cameraStream) {
     cameraStream.getTracks().forEach((t) => t.stop());
@@ -385,12 +388,18 @@ cameraToggleBtn.addEventListener('click', async () => {
     return;
   }
   try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 } } });
+    const wantsDevice = getDeviceChoice('camId');
+    const constraints = { video: wantsDevice ? { deviceId: { exact: wantsDevice }, width: { ideal: 640 } } : { width: { ideal: 640 } } };
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (e) {
+      cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    }
     cameraPreview.srcObject = cameraStream;
     cameraPreview.hidden = false;
     // A video element with a stream source does NOT auto-play reliably
     // (Safari especially): without play() it stays black AND videoWidth
-    // stays 0, which silently kills frame capture too.
+    // stays 0, which silently kills frame measurement too.
     try {
       await cameraPreview.play();
     } catch (e) {
@@ -398,28 +407,135 @@ cameraToggleBtn.addEventListener('click', async () => {
       log('Camera play error: ' + e.message);
     }
     cameraToggleBtn.textContent = 'Disable camera';
-    log('Camera on — frames are analyzed then discarded, never stored');
+    log('Camera on — landmark measurement runs on-device, frames never leave the browser');
+    // Load measurement models in the background; transcript coaching works
+    // with or without them.
+    ensureEstimator().then(
+      () => { cameraHintEl.textContent = 'Camera on — on-device measurement ready.'; log('Vision models loaded'); },
+      (e) => { cameraHintEl.textContent = 'Camera on, measurement unavailable (model download failed) — speech coaching unaffected.'; log('Estimator load failed: ' + e.message); }
+    );
   } catch (e) {
     cameraHintEl.textContent = 'Camera unavailable: ' + e.message;
     log('Camera error: ' + e.message);
   }
 });
 
-function captureFrame() {
+// Measure the live preview frame. Async (model inference); null when the
+// camera is off, unusable, or models failed to load. Never throws.
+async function observePreview() {
   try {
     if (!cameraStream || !cameraPreview.videoWidth) return null;
-    const c = document.createElement('canvas');
-    c.width = 320;
-    c.height = Math.round(cameraPreview.videoHeight * (320 / cameraPreview.videoWidth));
-    c.getContext('2d').drawImage(cameraPreview, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.6);
+    const lm = await estimateVideo(cameraPreview);
+    if (!lm) return { face: false };
+    return faceObservation(lm);
   } catch (e) { return null; }
 }
+
+// Sample-camera self-test: verifies the MediaPipe bundle + model load and
+// the detector runs, using a drawn test pattern (no face expected — a
+// drawing is not a person). Reports honestly what was found.
+async function testVisionPipeline() {
+  const el = document.getElementById('visionTestHint');
+  const say = (t) => { if (el) el.textContent = t; log('Vision test: ' + t); };
+  say('Loading measurement models…');
+  const t0 = Date.now();
+  try {
+    await ensureEstimator();
+    const ms = Date.now() - t0;
+    const c = document.createElement('canvas');
+    c.width = 320; c.height = 240;
+    const g = c.getContext('2d');
+    g.fillStyle = '#26334d'; g.fillRect(0, 0, 320, 240);
+    g.fillStyle = '#e8be96'; g.beginPath(); g.arc(160, 100, 40, 0, 7); g.fill();
+    g.fillStyle = '#222'; g.fillRect(140, 88, 12, 12); g.fillRect(168, 88, 12, 12);
+    g.fillStyle = '#22d3ee'; g.fillRect(60, 180, 200, 30);
+    const lm = await estimateVideo(c);
+    const obs = lm ? faceObservation(lm) : { face: false };
+    say('Pipeline OK (models loaded in ' + ms + ' ms, test pattern: ' +
+      (obs.face ? 'face detected, gaze ' + obs.yaw + '/' + obs.pitch : 'no face detected — expected for a drawing') +
+      '). Point the camera at a face for real checks.');
+  } catch (e) {
+    say('Vision pipeline unavailable: ' + e.message + ' — speech coaching unaffected.');
+  }
+}
+
+document.getElementById('visionTestBtn').addEventListener('click', testVisionPipeline);
 const healthLineEl = document.getElementById('healthLine');
 const statsLineEl = document.getElementById('statsLine');
 const attemptTimerEl = document.getElementById('attemptTimer');
 const liveWordsEl = document.getElementById('liveWords');
+const micSelect = document.getElementById('micSelect');
+const camSelect = document.getElementById('camSelect');
+const refreshDevicesBtn = document.getElementById('refreshDevicesBtn');
+const devicesHintEl = document.getElementById('devicesHint');
 let timerStop = null;
+
+// ---- Device selection (mic + camera), remembered per browser ----
+const DEVICE_KEY = 'voicecoach.devices.v1';
+
+function loadDeviceChoices() {
+  try {
+    const v = JSON.parse(localStorage.getItem(DEVICE_KEY));
+    return v && typeof v === 'object' ? v : {};
+  } catch (e) { return {}; }
+}
+
+function getDeviceChoice(kind) {
+  const all = loadDeviceChoices();
+  return typeof all[kind] === 'string' && all[kind] ? all[kind] : null;
+}
+
+function saveDeviceChoice(kind, id) {
+  try {
+    const all = loadDeviceChoices();
+    if (id) all[kind] = id;
+    else delete all[kind];
+    localStorage.setItem(DEVICE_KEY, JSON.stringify(all));
+  } catch (e) { /* ignore */ }
+}
+
+function fillSelect(sel, devices, savedId) {
+  sel.innerHTML = '<option value="">Default</option>' + devices.map((d, i) =>
+    '<option value="' + escapeHtml(d.deviceId) + '"' + (d.deviceId === savedId ? ' selected' : '') + '>' +
+    escapeHtml(d.label || ('Device ' + (i + 1))) + '</option>').join('');
+}
+
+async function refreshDevices() {
+  devicesHintEl.textContent = 'Looking for microphones and cameras…';
+  let tmp = null;
+  try { tmp = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { /* labels may stay empty without permission; ids still work */ }
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const saved = loadDeviceChoices();
+    fillSelect(micSelect, devs.filter((d) => d.kind === 'audioinput'), saved.micId);
+    fillSelect(camSelect, devs.filter((d) => d.kind === 'videoinput'), saved.camId);
+    devicesHintEl.textContent = 'Pick microphone/camera, or leave on default. Choices are remembered on this device.';
+  } catch (e) {
+    devicesHintEl.textContent = 'Could not list devices: ' + e.message;
+  } finally {
+    if (tmp) tmp.getTracks().forEach((t) => { try { t.stop(); } catch (e) { /* ignore */ } });
+  }
+}
+
+micSelect.addEventListener('change', () => saveDeviceChoice('micId', micSelect.value));
+camSelect.addEventListener('change', () => saveDeviceChoice('camId', camSelect.value));
+refreshDevicesBtn.addEventListener('click', refreshDevices);
+
+// Mic stream honoring the selected device, with default fallback so a
+// stale saved id can never brick the microphone.
+async function getMicStream() {
+  const micId = getDeviceChoice('micId');
+  const base = { echoCancellation: true, noiseSuppression: false };
+  if (micId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: micId } } });
+    } catch (e) {
+      log('Saved mic unavailable, using default: ' + e.message);
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: base });
+}
 
 function stopTimer() {
   if (timerStop) { try { timerStop(); } catch (e) { /* ignore */ } timerStop = null; }
@@ -789,11 +905,12 @@ startAttemptBtn.addEventListener('click', () => {
   // the other modes so a single final Turn can't submit twice.
   if (typeof debateRecorder !== 'undefined') debateRecorder.resetToIdle();
   if (typeof interviewRecorder !== 'undefined') interviewRecorder.resetToIdle();
-  attemptFrames = [captureFrame()].filter(Boolean);
-  attemptWordGroups = [];
+  attemptVisualObs = [];
   liveWordsEl.textContent = '';
   stopTimer();
   timerStop = startElapsedTimer(attemptTimerEl, Date.now());
+  // Fire-and-forget opening observation (never blocks recording start).
+  observeAndStore();
   userBox.textContent = '';
   setAttemptState('Recording', true);
   attemptHintEl.textContent = 'Recording attempt ' + (attemptCount + 1) + ' — speak now, then press “Finish attempt”.';
@@ -801,10 +918,9 @@ startAttemptBtn.addEventListener('click', () => {
   log('Attempt recording started');
 });
 
-finishAttemptBtn.addEventListener('click', () => {
+finishAttemptBtn.addEventListener('click', async () => {
   stopTimer();
-  const f = captureFrame();
-  if (f) attemptFrames.push(f);
+  await observeAndStore();
   const r = recorder.finish(Date.now());
   updateAttemptButtons();
   if (r.status === 'submitted') {
@@ -824,15 +940,15 @@ async function submitFinishedAttempt({ transcript, turnCount, durationMs }) {
   setAttemptState('Analyzing…', true);
   attemptHintEl.textContent = 'Analyzing attempt…';
   const coachEngine = selectedEngine();
-  const f = captureFrame();
-  if (f) attemptFrames.push(f);
-  // Frames ride along (max 3, never stored client-side either — lastAttempt
-  // and history records below deliberately exclude them).
-  const frames = attemptFrames.filter(Boolean).slice(-3);  try {
+  await observeAndStore();
+  // On-device visual summary (never images). lastAttempt and history
+  // records below deliberately carry no visual data beyond metrics.
+  const visual = summarizeObservations(attemptVisualObs);
+  try {
     const res = await fetch('/api/sessions/' + sessionId + '/attempts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript, durationMs, turnCount, coachEngine, previous: lastAttempt, frames, words: attemptWordGroups }),
+      body: JSON.stringify({ transcript, durationMs, turnCount, coachEngine, previous: lastAttempt, visual, words: attemptWordGroups }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || ('Attempt request returned ' + res.status));
@@ -850,7 +966,10 @@ async function submitFinishedAttempt({ transcript, turnCount, durationMs }) {
         retry_focus: data.analysis.retry_focus,
       },
     };
-    renderAnalysis(data.analysis, data.attempt, data.coachSource, data.requestedEngine || coachEngine, data.fallback === true, frames.length);
+    // cameraFrames: measured observation count, or -1 when the camera was
+    // on but produced nothing usable (models failed / no preview yet).
+    const cameraFrames = visual.frames > 0 ? visual.frames : (cameraStream ? -1 : 0);
+    renderAnalysis(data.analysis, data.attempt, data.coachSource, data.requestedEngine || coachEngine, cameraFrames);
     const history = saveAttemptToHistory({
       promptTitle: promptTitleEl.textContent,
       transcript,
@@ -899,22 +1018,17 @@ newPromptBtn.addEventListener('click', async () => {
   }
 });
 
-function renderAnalysis(analysis, attempt, coachSource, requestedEngine, fallback, cameraFrames) {
+function renderAnalysis(analysis, attempt, coachSource, requestedEngine, cameraFrames) {
   const m = analysis.metrics;
   const li = (items) => items.map((t) => '<li>' + escapeHtml(t) + '</li>').join('');
   const pace = m.wpm == null ? 'n/a' : m.wpm + ' wpm';
-  // Requested engine (the user's choice) vs the actual source (truthful in
-  // every combination, including vision-notes-on-rules-text).
+  // Requested engine (the user's choice) vs the actual source.
   const requested = requestedEngine === 'rules' ? 'Rules Coach' : 'AI Coach';
   const badge = coachSource === 'llm'
     ? '<span class="hint">AI Coach</span>'
-    : (coachSource === 'vision'
-      ? (fallback
-        ? '<span class="hint">Rules Coach + camera notes</span>'
-        : '<span class="hint">AI Coach + camera</span>')
-      : (requestedEngine === 'rules'
-        ? '<span class="hint">Rules Coach</span>'
-        : '<span class="hint">Rules Coach — AI fallback</span>'));
+    : (requestedEngine === 'rules'
+      ? '<span class="hint">Rules Coach</span>'
+      : '<span class="hint">Rules Coach — AI fallback</span>');
   feedbackBox.innerHTML =
     '<div class="feedback">' +
     '<h3>Attempt ' + attempt.n + ' · Coach: ' + escapeHtml(requested) + ' ' + badge + '</h3>' +
@@ -926,12 +1040,12 @@ function renderAnalysis(analysis, attempt, coachSource, requestedEngine, fallbac
     '<span class="metric">' + m.repeatCount + ' repeats</span>' +
     '<span class="metric">' + m.sentenceCount + ' sentences</span>' +
     (m.pausesMeasured ? '<span class="metric">' + m.pauseCount + ' pauses</span>' : '') +
+    (m.visualMeasured ? '<span class="metric">camera ' + m.visual.faces + '/' + m.visual.frames + ' faces</span>' : '') +
     '</div>' +
     (analysis.strengths.length ? '<h3>Strengths</h3><ul>' + li(analysis.strengths) + '</ul>' : '') +
     (analysis.areas_to_improve.length ? '<h3>Work on</h3><ul>' + li(analysis.areas_to_improve) + '</ul>' : '') +
     (analysis.actionable_feedback.length ? '<h3>Do next time</h3><ul>' + li(analysis.actionable_feedback) + '</ul>' : '') +
-    ((analysis.visual_notes && analysis.visual_notes.length) ? '<h3>On camera</h3><ul>' + li(analysis.visual_notes) + '</ul>' : '') +
-    ((cameraFrames > 0 && !(analysis.visual_notes && analysis.visual_notes.length)) ? '<div class="hint">Camera was on (' + cameraFrames + ' frame' + (cameraFrames === 1 ? '' : 's') + ' sent) but the vision model did not respond — free quota is often dry; text feedback unaffected.</div>' : '') +
+    ((cameraFrames > 0 && !m.visualMeasured) ? '<div class="hint">Camera was on but produced no usable measurements — check framing and light; text feedback unaffected.</div>' : '') +
     '<div class="retry-focus"><strong>Retry focus:</strong> ' + escapeHtml(analysis.retry_focus.focus) +
     '<br><span class="hint">' + escapeHtml(analysis.retry_focus.tip) + '</span></div>' +
     '</div>';
