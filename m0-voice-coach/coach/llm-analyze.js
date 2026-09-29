@@ -48,7 +48,7 @@ function slimMetrics(m) {
     fragments: m.fragmentCount,
     longSentences: m.longSentenceCount,
     pauses: m.pausesMeasured ? { count: m.pauseCount, longestMs: m.longestPauseMs } : null,
-    visual: m.visualMeasured ? m.visual : null,
+    visual: m.visualMeasured ? { ...m.visual, gaze: 'timeline entries are per-observation gaze (yaw/pitch), "absent" = no face that frame, "present" = face seen without landmark detail' } : null,
   };
 }
 

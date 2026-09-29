@@ -150,12 +150,16 @@ function sanitizeVisual(v) {
     const frames = Math.min(10, n(v.frames));
     if (!frames) return null;
     const clamp = (x) => Math.min(frames, n(x));
+    const timeline = Array.isArray(v.timeline)
+      ? v.timeline.slice(0, 12).filter((t) => typeof t === 'string').map((t) => t.slice(0, 30))
+      : [];
     return {
       frames,
       faces: clamp(v.faces),
       lookingDown: clamp(v.lookingDown),
       headTurned: clamp(v.headTurned),
       eyesClosed: clamp(v.eyesClosed),
+      timeline,
     };
   } catch (e) {
     return null;

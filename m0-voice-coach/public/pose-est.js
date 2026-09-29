@@ -68,12 +68,20 @@ function summarizeObservations(obs) {
   // Coarse observations (native box fallback) prove presence only — gaze
   // fields on them are defaults, never measurements, so gaze counts skip them.
   const fine = list.filter((o) => o && o.face && !o.coarse);
+  // Timeline: per-observation gaze tokens in order ("center/level", "absent"),
+  // capped — lets the coach see movement ("looked away, then came back").
+  const timeline = list.slice(0, 12).map((o) => {
+    if (!o || !o.face) return 'absent';
+    if (o.coarse) return 'present';
+    return (o.yaw || 'center') + '/' + (o.pitch || 'level');
+  });
   return {
     frames: list.length,
     faces: list.filter((o) => o && o.face).length,
     lookingDown: fine.filter((o) => o.pitch === 'down').length,
     headTurned: fine.filter((o) => o.yaw !== 'center').length,
     eyesClosed: fine.filter((o) => !o.eyesOpen).length,
+    timeline,
   };
 }
 

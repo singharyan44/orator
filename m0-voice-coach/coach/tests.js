@@ -473,6 +473,7 @@ if (fail) process.exit(1);
     ok('pose NaN safe', faceObservation(badLm).face === false, '');
     const sum = summarizeObservations([neutral, down, right, { face: false }, closed]);
     ok('pose summary', sum.frames === 5 && sum.faces === 4 && sum.lookingDown === 1 && sum.headTurned === 1 && sum.eyesClosed === 1, JSON.stringify(sum));
+    ok('pose timeline', JSON.stringify(sum.timeline) === JSON.stringify(['center/level', 'center/down', 'right/level', 'absent', 'center/level']), JSON.stringify(sum.timeline));
     ok('pose summary empty', summarizeObservations(null).frames === 0, '');
     ok('pose native guard', nativeFaceAvailable() === false, 'no FaceDetector in node');
     const coarse = summarizeObservations([
@@ -495,8 +496,9 @@ if (fail) process.exit(1);
       visual: { frames: 3, faces: 3, lookingDown: 2, headTurned: 0, eyesClosed: 0 },
     });
     ok('visual attach', vm.visualMeasured === true && vm.visual.lookingDown === 2, '');
-    const vmClamped = computeMetrics({ transcript: 'Hi there friend.', durationMs: 3000, turnCount: 1, visual: { frames: 2, faces: 99, lookingDown: -5, headTurned: 'x' } });
+    const vmClamped = computeMetrics({ transcript: 'Hi there friend.', durationMs: 3000, turnCount: 1, visual: { frames: 2, faces: 99, lookingDown: -5, headTurned: 'x', timeline: ['center/level', 42, 'down'.repeat(50)] } });
     ok('visual sanitized', vmClamped.visual.faces === 2 && vmClamped.visual.lookingDown === 0 && vmClamped.visual.headTurned === 0, JSON.stringify(vmClamped.visual));
+    ok('visual timeline sanitized', vmClamped.visual.timeline.length === 2 && vmClamped.visual.timeline[0] === 'center/level' && vmClamped.visual.timeline[1].length === 30, JSON.stringify(vmClamped.visual.timeline));
     const vmNone = computeMetrics({ transcript: 'Hi there friend.', durationMs: 3000, turnCount: 1, visual: { frames: 0 } });
     ok('visual empty', vmNone.visualMeasured === false && vmNone.visual === null, '');
     const vmJunk = computeMetrics({ transcript: 'Hi there friend.', durationMs: 3000, turnCount: 1, visual: 'junk' });

@@ -448,6 +448,11 @@ cameraToggleBtn.addEventListener('click', async () => {
       },
       (e) => { cameraHintEl.textContent = 'Camera on, measurement unavailable (model download failed) — speech coaching unaffected.'; log('Estimator load failed: ' + e.message); }
     );
+    // Preload the fast BlazeFace model too so overlay ticks don't pay its
+    // download cost mid-stream. Silent on failure (landmarker path covers).
+    if (typeof ensureBlaze === 'function') {
+      ensureBlaze().then(() => log('BlazeFace ready'), () => {});
+    }
   } catch (e) {
     cameraHintEl.textContent = 'Camera unavailable: ' + e.message;
     log('Camera error: ' + e.message);
@@ -478,8 +483,6 @@ function startOverlayLoop() {
     ticking = true;
     try {
       const t0 = Date.now();
-      const lm = await estimateVideo(cameraPreview, 320);
-      const ms = Date.now() - t0;
       // Show the exact snapshot the detector received: black/empty here
       // means a capture problem; a clear face with no detection means a
       // sensitivity problem. Either way, no more guessing.
@@ -497,7 +500,23 @@ function startOverlayLoop() {
       faceOverlay.height = h;
       const g = faceOverlay.getContext('2d');
       g.clearRect(0, 0, w, h);
+      // FAST TRACK first: BlazeFace answers in tens of ms, so the box
+      // appears instantly; landmarks upgrade it when they finish.
+      let blaze = null;
+      try {
+        const snapFast = snapshotVideo(cameraPreview, 320);
+        if (snapFast) blaze = await detectBlaze(snapFast);
+      } catch (e) { /* landmarker path below */ }
+      if (blaze) {
+        g.strokeStyle = '#facc15';
+        g.lineWidth = 2;
+        g.strokeRect(blaze.x * w, blaze.y * h, blaze.width * w, blaze.height * h);
+        faceStatusEl.textContent = 'Face: yes (fast track)…';
+      }
+      const lm = await estimateVideo(cameraPreview, 320);
+      const ms = Date.now() - t0;
       if (lm) {
+        g.clearRect(0, 0, w, h);
         for (const p of lm) {
           g.fillStyle = '#22d3ee';
           g.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
@@ -506,18 +525,8 @@ function startOverlayLoop() {
         faceStatusEl.textContent = 'Face: yes (landmarks) · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed') + ' (' + ms + 'ms)';
         return;
       }
-      // Landmarker saw nothing: second opinion from BlazeFace on the same
-      // snapshot. Different model, same pixels — disagreement isolates the
-      // cause (model setup vs. input/lighting).
-      let blaze = null;
-      try {
-        const snap = snapshotVideo(cameraPreview);
-        if (snap) blaze = await detectBlaze(snap);
-      } catch (e) { log('BlazeFace check failed: ' + e.message); }
+      // Landmarker saw nothing but Blaze did: keep the fast box, say so.
       if (blaze) {
-        g.strokeStyle = '#facc15';
-        g.lineWidth = 2;
-        g.strokeRect(blaze.x * w, blaze.y * h, blaze.width * w, blaze.height * h);
         faceStatusEl.textContent = 'Face: yes (BlazeFace — landmarker missed it) (' + ms + 'ms)';
         return;
       }
