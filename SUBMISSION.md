@@ -49,3 +49,14 @@ Groq/OpenRouter LLMs, vanilla JS frontend, Vercel + GitHub.
   → measured retry) plus the personal profile that compounds per user.
 - **Future:** more scenarios (negotiation, teaching, leadership), video-aware
   coaching (spiked), team/coach dashboards, mobile app.
+
+## Cover image
+`m0-voice-coach/public/cover.png` is a safe textless fallback (mic artwork,
+16:9, valid). For the real submission cover, paste this into Nano Banana,
+Gemini, or ChatGPT Images — then verify EVERY letter before uploading:
+
+> Wide 16:9 banner, dark navy background (#0f172a). A glowing cyan
+> microphone icon on the left. Large clean white sans-serif title "ORATOR".
+> Beneath it, smaller cyan text "PRACTICE. DIAGNOSE. RETRY. IMPROVE." and
+> gray text "SPEECH. DEBATE. INTERVIEW." Minimal, modern, high contrast,
+> no people, no clutter. IMPORTANT: spell every word exactly as written.

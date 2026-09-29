@@ -21,7 +21,7 @@ for (let y = 0; y < H; y++) {
 // cyan glow disc behind mic
 const CYAN = [34, 211, 238], WHITE = [226, 232, 240], DIM = [148, 163, 184];
 for (let y = 0; y < H; y++) for (let x = 0; x < H; x++) {
-  const d = Math.hypot(x - 300, y - 360) / 300;
+  const d = Math.hypot(x - 640, y - 360) / 380;
   if (d < 1) {
     const o = y * (W * 3 + 1) + 1 + x * 3;
     const k = (1 - d) * 0.25;
@@ -29,7 +29,8 @@ for (let y = 0; y < H; y++) for (let x = 0; x < H; x++) {
   }
 }
 // mic glyph
-const cx = 300, r = 78, top = 200, bot = 430;
+// Centered hero mic (no text — see note above).
+const cx = 640, r = 105, top = 150, bot = 420;
 for (let y = top; y < bot; y++) for (let x = cx - r; x < cx + r; x++) {
   const inCap = (y > top + r && y < bot - r && Math.abs(x - cx) <= r);
   const dTop = Math.hypot(x - cx, y - (top + r)), dBot = Math.hypot(x - cx, y - (bot - r));
@@ -54,9 +55,13 @@ function text(str, x, y, scale, color) {
   }
   return cxp;
 }
-text('ORATOR', 560, 250, 16, WHITE);
-text('PRACTICE. DIAGNOSE. RETRY. IMPROVE.', 562, 400, 3, CYAN);
-text('SPEECH. DEBATE. INTERVIEW.', 562, 440, 3, DIM);
+// NOTE: programmatic text is DISABLED — pixel-font glyphs proved
+// unreliable without visual verification. The cover ships as artwork only;
+// use Nano Banana / ChatGPT Images with the prompt in SUBMISSION.md for a
+// designed version with typography.
+// text('ORATOR', 560, 250, 16, WHITE);
+// text('PRACTICE. DIAGNOSE. RETRY. IMPROVE.', 562, 400, 3, CYAN);
+// text('SPEECH. DEBATE. INTERVIEW.', 562, 440, 3, DIM);
 
 function crcTable() {
   const t = new Int32Array(256);
