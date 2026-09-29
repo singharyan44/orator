@@ -17,6 +17,15 @@ function log(msg) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// Surface unexpected JS failures in the visible log (not just the console):
+// remote debugging depends on the user being able to paste these lines.
+window.addEventListener('error', (e) => {
+  try { log('JS error: ' + (e.message || (e.error && e.error.message) || 'unknown')); } catch (_) { /* never recurse */ }
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try { log('Async error: ' + ((e.reason && e.reason.message) || e.reason || 'unknown')); } catch (_) { /* never recurse */ }
+});
+
 function setStatus(text, color = '#cbd5e1') {
   statusEl.textContent = text;
   statusEl.style.background = color === '#22d3ee' ? '#22d3ee20' : '#334155';
@@ -376,6 +385,20 @@ let cameraStream = null;
 // except the aggregated summary).
 let attemptVisualObs = [];
 
+// Observe one preview frame and store it. `timeoutMs` bounds the wait so a
+// stalled model download can never strand a click handler (Finish must
+// always reach the recorder). Never throws.
+async function observeAndStore(timeoutMs) {
+  try {
+    const o = timeoutMs
+      ? await withTimeout(observePreview(), timeoutMs)
+      : await observePreview();
+    const obs = o && typeof o.timedOut === 'boolean' ? (o.timedOut ? null : o.value) : o;
+    if (o && o.timedOut) log('Vision observe timed out — continuing without it');
+    else if (obs) attemptVisualObs.push(obs);
+  } catch (e) { /* ignore */ }
+}
+
 // ---- Opt-in camera: on-device landmark measurement per attempt ----
 cameraToggleBtn.addEventListener('click', async () => {
   if (cameraStream) {
@@ -442,8 +465,11 @@ function stopOverlayLoop() {
 function startOverlayLoop() {
   stopOverlayLoop();
   faceOverlay.hidden = false;
+  let ticking = false;
   overlayTimer = setInterval(async () => {
     if (!cameraStream) { stopOverlayLoop(); return; }
+    if (ticking) return; // never pile up slow inferences
+    ticking = true;
     try {
       const lm = await estimateVideo(cameraPreview);
       const w = cameraPreview.clientWidth || 160;
@@ -464,6 +490,8 @@ function startOverlayLoop() {
       faceStatusEl.textContent = 'Face: yes · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed');
     } catch (e) {
       faceStatusEl.textContent = 'Detection error: ' + e.message;
+    } finally {
+      ticking = false;
     }
   }, 800);
 }
@@ -943,9 +971,18 @@ setStatus = function (text, color) {
 };
 
 startAttemptBtn.addEventListener('click', () => {
-  if (!sessionId || recorder.isRecording() || recorder.isFinishing()) return;
+  if (!sessionId) {
+    attemptHintEl.textContent = 'No practice session yet — reload the page (prompt failed to load).';
+    log('Start blocked: no sessionId');
+    return;
+  }
+  if (recorder.isRecording() || recorder.isFinishing()) {
+    log('Start ignored: attempt already in progress');
+    return;
+  }
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     attemptHintEl.textContent = 'Connect first, then start the attempt.';
+    log('Start blocked: not connected');
     return;
   }
   recorder.start(Date.now());
@@ -968,7 +1005,7 @@ startAttemptBtn.addEventListener('click', () => {
 
 finishAttemptBtn.addEventListener('click', async () => {
   stopTimer();
-  await observeAndStore();
+  await observeAndStore(3000);
   const r = recorder.finish(Date.now());
   updateAttemptButtons();
   if (r.status === 'submitted') {
@@ -988,7 +1025,7 @@ async function submitFinishedAttempt({ transcript, turnCount, durationMs }) {
   setAttemptState('Analyzing…', true);
   attemptHintEl.textContent = 'Analyzing attempt…';
   const coachEngine = selectedEngine();
-  await observeAndStore();
+  await observeAndStore(3000);
   // On-device visual summary (never images). lastAttempt and history
   // records below deliberately carry no visual data beyond metrics.
   const visual = summarizeObservations(attemptVisualObs);

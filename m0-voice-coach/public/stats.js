@@ -56,6 +56,17 @@ function startElapsedTimer(el, sinceTs) {
   return () => clearInterval(id);
 }
 
+// Race a promise against a timeout. Resolves with { timedOut: true } instead
+// of hanging forever — used for vision calls in click handlers, where an
+// unbounded await would strand the UI (e.g. Finish never completing because
+// a model download stalled).
+function withTimeout(promise, ms) {
+  return Promise.race([
+    Promise.resolve(promise).then((value) => ({ timedOut: false, value })),
+    new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), ms)),
+  ]);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { formatElapsed, dayKey, dayStats, startElapsedTimer };
+  module.exports = { formatElapsed, dayKey, dayStats, startElapsedTimer, withTimeout };
 }

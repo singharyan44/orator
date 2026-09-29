@@ -20,7 +20,7 @@ const { ROLES, getRole, validateQuestion, validateInterviewDiagnosis, stockFollo
 const { interviewerNext, diagnoseInterview } = require('./interview-llm');
 const { buildVoiceOpponentPrompt } = require('./voice-opponent');
 const { splitSpokenText } = require('../public/speech-out');
-const { formatElapsed, dayStats } = require('../public/stats');
+const { formatElapsed, dayStats, withTimeout } = require('../public/stats');
 const { buildSessionText, verdictSummary } = require('../public/export-text');
 const { faceObservation, summarizeObservations, MP } = require('../public/pose-est');
 
@@ -662,6 +662,10 @@ if (fail) process.exit(1);
     const s3 = dayStats([{ metrics: {}, createdAt: ld(22) }], new Date(2026, 8, 22, 12, 0, 0));
     ok('stats missing metrics', s3.todayCount === 1 && s3.totalMin === 0, '');
     ok('stats empty', dayStats([], new Date()).todayCount === 0, '');
+    const fast = await withTimeout(Promise.resolve(7), 1000);
+    ok('timeout fast path', fast.timedOut === false && fast.value === 7, '');
+    const slow = await withTimeout(new Promise(() => {}), 20);
+    ok('timeout slow path', slow.timedOut === true, '');
   }
 
   console.log('STATS-RESULT pass=' + pass + ' fail=' + fail);

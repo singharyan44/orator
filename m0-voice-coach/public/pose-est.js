@@ -77,8 +77,9 @@ let landmarkerPromise = null;
 
 // Loads the MediaPipe bundle + face model from CDN (throws on failure so
 // callers degrade to transcript-only coaching). Cached after first load.
-// VIDEO running mode: the documented-correct path for webcam streams
-// (IMAGE-mode detect() on a playing <video> silently yields nothing).
+// IMAGE running mode + canvas snapshots: the single path that works for live
+// video, stills, and test patterns alike (calling VIDEO-mode methods fails
+// on some bundle builds with "must be set to IMAGE").
 async function ensureEstimator() {
   if (landmarkerPromise) return landmarkerPromise;
   landmarkerPromise = (async () => {
@@ -86,7 +87,7 @@ async function ensureEstimator() {
     const vision = await mod.FilesetResolver.forVisionTasks(MP.WASM_URL);
     const lm = await mod.FaceLandmarker.createFromOptions(vision, {
       baseOptions: { modelAssetPath: MP.FACE_MODEL_URL },
-      runningMode: 'VIDEO',
+      runningMode: 'IMAGE',
       numFaces: 1,
     });
     return lm;
@@ -103,22 +104,29 @@ function extractFaces(res) {
   return faces[0];
 }
 
-// Detect on a <video> (or canvas/image). Prefers timestamped VIDEO-mode
-// detection; falls back to IMAGE-mode detect() for sources that need it.
-// Returns landmarks array or null. Timestamps must be monotonic.
+// Detect on a <video>, canvas, or image. Video elements are snapshotted to
+// an offscreen canvas first (capped at 480px wide): IMAGE-mode detect() on
+// a canvas is the well-trodden path, direct video detection is not.
+// Returns landmarks array or null. Never throws for bad input (null);
+// model-load failures DO throw so callers can report them.
 async function estimateVideo(source) {
   const lm = await ensureEstimator();
-  const ts = Math.floor((typeof performance !== 'undefined' ? performance.now() : Date.now()));
-  if (typeof lm.detectForVideo === 'function') {
-    try {
-      const found = extractFaces(await lm.detectForVideo(source, ts));
-      if (found) return found;
-    } catch (e) { /* fall through to IMAGE mode */ }
+  let target = source;
+  try {
+    if (source && source.tagName === 'VIDEO') {
+      if (!source.videoWidth || (typeof source.readyState === 'number' && source.readyState < 2)) return null;
+      const scale = Math.min(1, 480 / source.videoWidth);
+      const c = document.createElement('canvas');
+      c.width = Math.max(2, Math.round(source.videoWidth * scale));
+      c.height = Math.max(2, Math.round(source.videoHeight * scale));
+      c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+      target = c;
+    }
+    return extractFaces(await lm.detect(target));
+  } catch (e) {
+    if (source && source.tagName === 'VIDEO') return null;
+    throw e;
   }
-  if (typeof lm.detect === 'function') {
-    return extractFaces(await lm.detect(source));
-  }
-  return null;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
