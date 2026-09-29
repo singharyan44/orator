@@ -46,9 +46,10 @@ function text(str, x, y, scale, color) {
     const g = F[ch] || F[' '];
     for (let col = 0; col < 5; col++)
       for (let row = 0; row < 7; row++)
+        // bit 0 is the TOP row in this font: map rows straight down.
         if (g[col] & (1 << row))
           for (let dy = 0; dy < scale; dy++)
-            for (let dx = 0; dx < scale; dx++) px(cxp + col * scale + dx, y + (6 - row) * scale + dy, color);
+            for (let dx = 0; dx < scale; dx++) px(cxp + col * scale + dx, y + row * scale + dy, color);
     cxp += 6 * scale;
   }
   return cxp;

@@ -87,7 +87,11 @@
         <button id="cameraToggleBtn" class="btn btn-small">Enable camera</button>
         <button id="visionTestBtn" class="btn btn-small">Test vision pipeline</button>
       </div>
-      <video id="cameraPreview" muted playsinline hidden width="160"></video>
+      <div class="cam-wrap">
+        <video id="cameraPreview" muted playsinline hidden width="160"></video>
+        <canvas id="faceOverlay" hidden></canvas>
+      </div>
+      <div id="faceStatus" class="hint"></div>
       <div id="cameraHint" class="hint">Optional camera: face measurements per attempt are analyzed on-device, then discarded — never stored.</div>
       <div id="visionTestHint" class="hint"></div>
       <div id="attemptHint" class="hint">Connect, then press “Start attempt” and speak.</div>

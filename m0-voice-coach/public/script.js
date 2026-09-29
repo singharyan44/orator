@@ -379,10 +379,13 @@ let attemptVisualObs = [];
 // ---- Opt-in camera: on-device landmark measurement per attempt ----
 cameraToggleBtn.addEventListener('click', async () => {
   if (cameraStream) {
+    stopOverlayLoop();
     cameraStream.getTracks().forEach((t) => t.stop());
     cameraStream = null;
     cameraPreview.srcObject = null;
     cameraPreview.hidden = true;
+    faceOverlay.hidden = true;
+    faceStatusEl.textContent = '';
     cameraToggleBtn.textContent = 'Enable camera';
     log('Camera off');
     return;
@@ -411,7 +414,11 @@ cameraToggleBtn.addEventListener('click', async () => {
     // Load measurement models in the background; transcript coaching works
     // with or without them.
     ensureEstimator().then(
-      () => { cameraHintEl.textContent = 'Camera on — on-device measurement ready.'; log('Vision models loaded'); },
+      () => {
+        cameraHintEl.textContent = 'Camera on — on-device measurement ready.';
+        log('Vision models loaded');
+        startOverlayLoop();
+      },
       (e) => { cameraHintEl.textContent = 'Camera on, measurement unavailable (model download failed) — speech coaching unaffected.'; log('Estimator load failed: ' + e.message); }
     );
   } catch (e) {
@@ -419,6 +426,47 @@ cameraToggleBtn.addEventListener('click', async () => {
     log('Camera error: ' + e.message);
   }
 });
+
+// Live face overlay: every ~800 ms while the camera is on, run detection
+// on the preview, draw landmark dots, and report the reading. This is the
+// visible proof of what the detector sees — if dots track your face, the
+// pipeline works; if nothing ever appears, detection truly fails here.
+function stopOverlayLoop() {
+  if (overlayTimer) { clearInterval(overlayTimer); overlayTimer = null; }
+  try {
+    const g = faceOverlay.getContext('2d');
+    g.clearRect(0, 0, faceOverlay.width, faceOverlay.height);
+  } catch (e) { /* ignore */ }
+}
+
+function startOverlayLoop() {
+  stopOverlayLoop();
+  faceOverlay.hidden = false;
+  overlayTimer = setInterval(async () => {
+    if (!cameraStream) { stopOverlayLoop(); return; }
+    try {
+      const lm = await estimateVideo(cameraPreview);
+      const w = cameraPreview.clientWidth || 160;
+      const h = cameraPreview.clientHeight || 120;
+      faceOverlay.width = w;
+      faceOverlay.height = h;
+      const g = faceOverlay.getContext('2d');
+      g.clearRect(0, 0, w, h);
+      if (!lm) {
+        faceStatusEl.textContent = 'Face: not detected — move into frame and light your face.';
+        return;
+      }
+      for (const p of lm) {
+        g.fillStyle = '#22d3ee';
+        g.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
+      }
+      const obs = faceObservation(lm);
+      faceStatusEl.textContent = 'Face: yes · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed');
+    } catch (e) {
+      faceStatusEl.textContent = 'Detection error: ' + e.message;
+    }
+  }, 800);
+}
 
 // Measure the live preview frame. Async (model inference); null when the
 // camera is off, unusable, or models failed to load. Never throws.
