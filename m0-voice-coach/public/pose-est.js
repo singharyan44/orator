@@ -77,6 +77,8 @@ let landmarkerPromise = null;
 
 // Loads the MediaPipe bundle + face model from CDN (throws on failure so
 // callers degrade to transcript-only coaching). Cached after first load.
+// VIDEO running mode: the documented-correct path for webcam streams
+// (IMAGE-mode detect() on a playing <video> silently yields nothing).
 async function ensureEstimator() {
   if (landmarkerPromise) return landmarkerPromise;
   landmarkerPromise = (async () => {
@@ -84,7 +86,7 @@ async function ensureEstimator() {
     const vision = await mod.FilesetResolver.forVisionTasks(MP.WASM_URL);
     const lm = await mod.FaceLandmarker.createFromOptions(vision, {
       baseOptions: { modelAssetPath: MP.FACE_MODEL_URL },
-      runningMode: 'IMAGE',
+      runningMode: 'VIDEO',
       numFaces: 1,
     });
     return lm;
@@ -95,13 +97,28 @@ async function ensureEstimator() {
   return landmarkerPromise;
 }
 
-// Detect on a <video> (or canvas/image). Returns landmarks array or null.
-async function estimateVideo(source) {
-  const lm = await ensureEstimator();
-  const res = await lm.detect(source);
+function extractFaces(res) {
   const faces = res && res.faceLandmarks;
   if (!faces || !faces.length) return null;
   return faces[0];
+}
+
+// Detect on a <video> (or canvas/image). Prefers timestamped VIDEO-mode
+// detection; falls back to IMAGE-mode detect() for sources that need it.
+// Returns landmarks array or null. Timestamps must be monotonic.
+async function estimateVideo(source) {
+  const lm = await ensureEstimator();
+  const ts = Math.floor((typeof performance !== 'undefined' ? performance.now() : Date.now()));
+  if (typeof lm.detectForVideo === 'function') {
+    try {
+      const found = extractFaces(await lm.detectForVideo(source, ts));
+      if (found) return found;
+    } catch (e) { /* fall through to IMAGE mode */ }
+  }
+  if (typeof lm.detect === 'function') {
+    return extractFaces(await lm.detect(source));
+  }
+  return null;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
