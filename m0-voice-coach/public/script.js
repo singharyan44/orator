@@ -388,6 +388,105 @@ let cameraStream = null;
 // except the aggregated summary).
 let attemptVisualObs = [];
 
+// ---- Off-main-thread inference (fixes INP) ----
+// MediaPipe detect() blocks the UI thread for 1-3 s on CPU: clicks freeze
+// and the INP warning fires. vision-worker.js runs the SAME models in a Web
+// Worker; every detection site below tries the worker first and falls back
+// to the existing main-thread path when workers are unavailable, so the
+// page keeps working everywhere. Callers transfer an ImageBitmap and get
+// back { landmarks|null, box|null, ms }. Never throws (throws internally,
+// caught by callers that fall back).
+let visionWorker = null;
+let visionWorkerSeq = 0;
+const visionPending = new Map();
+function ensureVisionWorker() {
+  if (visionWorker) return visionWorker;
+  try {
+    if (typeof Worker !== 'function') return null;
+    const w = new Worker('vision-worker.js', { type: 'module' });
+    w.onmessage = (e) => {
+      const data = e.data || {};
+      const pending = visionPending.get(data.id);
+      if (pending) {
+        visionPending.delete(data.id);
+        pending(data);
+      }
+    };
+    w.onerror = () => {
+      try {
+        w.terminate();
+      } catch (_) { /* noop */ }
+      if (visionWorker === w) visionWorker = null;
+      for (const [, resolve] of visionPending) {
+        try {
+          resolve({ ok: false, error: 'worker error' });
+        } catch (_) { /* noop */ }
+      }
+      visionPending.clear();
+    };
+    visionWorker = w;
+    return w;
+  } catch (e) {
+    return null;
+  }
+}
+function terminateVisionWorker() {
+  for (const [, resolve] of visionPending) {
+    try {
+      resolve({ ok: false, error: 'worker terminated' });
+    } catch (_) { /* noop */ }
+  }
+  visionPending.clear();
+  if (visionWorker) {
+    try {
+      visionWorker.terminate();
+    } catch (_) { /* noop */ }
+    visionWorker = null;
+  }
+}
+async function workerDetectBitmap(bitmap, timeoutMs) {
+  const w = ensureVisionWorker();
+  if (!w) throw new Error('vision worker unavailable');
+  const id = ++visionWorkerSeq;
+  const outcome = await withTimeout(
+    new Promise((resolve) => {
+      visionPending.set(id, resolve);
+      try {
+        w.postMessage({ id, bitmap }, [bitmap]);
+      } catch (e) {
+        visionPending.delete(id);
+        resolve({ ok: false, error: String((e && e.message) || e) });
+      }
+    }),
+    timeoutMs || 20000,
+    'vision worker'
+  );
+  const res = outcome && outcome.timedOut ? null : outcome.value;
+  if (!res) {
+    visionPending.delete(id);
+    throw new Error('vision worker timeout');
+  }
+  if (!res.ok) throw new Error(res.error || 'vision worker failed');
+  return res;
+}
+// Fire-and-forget worker + model warm-up at camera-on, so overlay ticks
+// find a hot worker instead of paying the download during a tick.
+function warmVisionWorker() {
+  try {
+    if (!ensureVisionWorker()) return;
+    const c = document.createElement('canvas');
+    c.width = 8;
+    c.height = 8;
+    if (typeof createImageBitmap !== 'function') return;
+    createImageBitmap(c).then(
+      (bmp) => {
+        workerDetectBitmap(bmp, 60000).catch(() => {});
+      },
+      () => {}
+    );
+  } catch (e) { /* best effort only */ }
+}
+
 // Observe one preview frame and store it. `timeoutMs` bounds the wait so a
 // stalled model download can never strand a click handler (Finish must
 // always reach the recorder). Never throws.
@@ -406,6 +505,7 @@ async function observeAndStore(timeoutMs) {
 cameraToggleBtn.addEventListener('click', async () => {
   if (cameraStream) {
     stopOverlayLoop();
+    terminateVisionWorker();
     cameraStream.getTracks().forEach((t) => t.stop());
     cameraStream = null;
     cameraPreview.srcObject = null;
@@ -453,6 +553,8 @@ cameraToggleBtn.addEventListener('click', async () => {
     if (typeof ensureBlaze === 'function') {
       ensureBlaze().then(() => log('BlazeFace ready'), () => {});
     }
+    // Warm the inference worker in the background for the same reason.
+    warmVisionWorker();
   } catch (e) {
     cameraHintEl.textContent = 'Camera unavailable: ' + e.message;
     log('Camera error: ' + e.message);
@@ -505,20 +607,53 @@ function startOverlayLoop() {
       faceOverlay.height = h;
       const g = faceOverlay.getContext('2d');
       g.clearRect(0, 0, w, h);
-      // FAST TRACK first: BlazeFace answers in tens of ms, so the box
-      // appears instantly; landmarks upgrade it when they finish.
+      // WORKER FIRST: the full inference (landmarks + Blaze fallback) runs
+      // off the UI thread, so clicks stay responsive no matter how slow
+      // detection is. The main-thread fast track below is only the fallback
+      // for browsers without worker support.
+      let lm = null;
       let blaze = null;
+      let viaWorker = false;
       try {
-        const snapFast = snapshotVideo(cameraPreview, 320);
-        if (snapFast) blaze = await detectBlaze(snapFast);
-      } catch (e) { /* landmarker path below */ }
-      if (blaze) {
+        faceStatusEl.textContent = 'Face: detecting…';
+        const bmp = await createImageBitmap(cameraPreview);
+        try {
+          const res = await workerDetectBitmap(bmp, 25000);
+          lm = res.landmarks || null;
+          if (!lm && res.box && res.box.bw) {
+            blaze = {
+              x: (res.box.x || 0) / res.box.bw,
+              y: (res.box.y || 0) / res.box.bh,
+              width: (res.box.width || 0) / res.box.bw,
+              height: (res.box.height || 0) / res.box.bh,
+            };
+          }
+          viaWorker = true;
+        } catch (e) {
+          try { bmp.close(); } catch (_) { /* noop */ }
+          throw e;
+        }
+      } catch (e) { /* worker unavailable/failed: main-thread fallback below */ }
+      if (!viaWorker) {
+        // FAST TRACK fallback: BlazeFace answers in tens of ms, so the box
+        // appears quickly; landmarks upgrade it when they finish.
+        try {
+          const snapFast = snapshotVideo(cameraPreview, 320);
+          if (snapFast) blaze = await detectBlaze(snapFast);
+        } catch (e) { /* landmarker path below */ }
+        if (blaze) {
+          g.strokeStyle = '#facc15';
+          g.lineWidth = 2;
+          g.strokeRect(blaze.x * w, blaze.y * h, blaze.width * w, blaze.height * h);
+          faceStatusEl.textContent = 'Face: yes (fast track)…';
+        }
+        lm = await estimateVideo(cameraPreview, 320);
+      } else if (blaze) {
         g.strokeStyle = '#facc15';
         g.lineWidth = 2;
         g.strokeRect(blaze.x * w, blaze.y * h, blaze.width * w, blaze.height * h);
-        faceStatusEl.textContent = 'Face: yes (fast track)…';
+        faceStatusEl.textContent = 'Face: yes (worker)…';
       }
-      const lm = await estimateVideo(cameraPreview, 320);
       const ms = Date.now() - t0;
       if (lm) {
         g.clearRect(0, 0, w, h);
@@ -565,6 +700,21 @@ function startOverlayLoop() {
 async function observePreview() {
   try {
     if (!cameraStream || !cameraPreview.videoWidth) return null;
+    // Worker first: attempt observations must never freeze the Finish path.
+    try {
+      if (typeof createImageBitmap === 'function') {
+        const bmp = await createImageBitmap(cameraPreview);
+        try {
+          const res = await workerDetectBitmap(bmp, 12000);
+          if (res.landmarks) return faceObservation(res.landmarks);
+          if (res.box) return { face: true, coarse: true, yaw: 'center', pitch: 'level', eyesOpen: true };
+          return { face: false };
+        } catch (e) {
+          try { bmp.close(); } catch (_) { /* noop */ }
+          throw e;
+        }
+      }
+    } catch (e) { /* fall through to the main-thread path */ }
     const lm = await estimateVideo(cameraPreview);
     if (lm) return faceObservation(lm);
     const box = await estimateBox(cameraPreview);
@@ -607,19 +757,38 @@ async function testVisionPipeline() {
     g.fillStyle = '#222'; g.fillRect(140, 88, 12, 12); g.fillRect(168, 88, 12, 12);
     g.fillStyle = '#22d3ee'; g.fillRect(60, 180, 200, 30);
     const d0 = Date.now();
-    const lm = await estimateVideo(c);
+    say('Detecting (off the UI thread)…');
+    await new Promise((r) => setTimeout(r, 0));
+    let lm = null;
+    let blaze = 'untested';
+    let workerUsed = false;
+    try {
+      const bmp = await createImageBitmap(c);
+      try {
+        const res = await workerDetectBitmap(bmp, 25000);
+        lm = res.landmarks || null;
+        blaze = res.box ? 'face?!' : 'no face';
+        workerUsed = true;
+      } catch (e) {
+        try { bmp.close(); } catch (_) { /* noop */ }
+        throw e;
+      }
+    } catch (e) { /* worker unavailable: main-thread fallback below */ }
+    if (!workerUsed) {
+      lm = await estimateVideo(c);
+      try {
+        const b = await detectBlaze(c);
+        blaze = b ? 'face?!' : 'no face';
+      } catch (e) { blaze = 'error: ' + e.message; }
+    }
     const detectMs = Date.now() - d0;
     const obs = lm ? faceObservation(lm) : { face: false };
-    let blaze = 'untested';
-    try {
-      const b = await detectBlaze(c);
-      blaze = b ? 'face?!' : 'no face';
-    } catch (e) { blaze = 'error: ' + e.message; }
     const vw = (typeof cameraPreview !== 'undefined' && cameraPreview.videoWidth) || 0;
     say('Pipeline OK (load ' + loadMs + 'ms, detect ' + detectMs + 'ms, ' +
       'estimator: ' + inv + ', ' +
       'pattern landmarks: ' + (obs.face ? 'face?! gaze ' + obs.yaw + '/' + obs.pitch : 'no face — expected for a drawing') + ', ' +
       'pattern blazeface: ' + blaze + ', ' +
+      'inference engine: ' + (workerUsed ? 'web worker (UI thread free)' : 'main thread (worker unavailable)') + ', ' +
       'native detector: ' + nativeSupport + ', ' +
       'video: ' + vw + 'px' + (cameraStream ? '' : ' (camera off)') + '). ' +
       'For live results watch the dots + Face line above.');
