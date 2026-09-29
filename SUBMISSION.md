@@ -2,7 +2,7 @@
 
 ## Links
 - Live demo: https://voice-coach-seven.vercel.app
-- Repo: https://github.com/singharyan44/voice-coach
+- Repo: https://github.com/singharyan44/orator
 
 ## Tagline
 A real-time voice coach: speak, get specific feedback, retry, and see exactly
