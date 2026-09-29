@@ -494,6 +494,11 @@ function startOverlayLoop() {
           snapImg.hidden = false;
         }
       } catch (e) { /* preview is diagnostic-only */ }
+      // Yield so the snapshot above actually PAINTS before the blocking
+      // detect() call below (~1-2 s on CPU fallback). Without this, setting
+      // .src does nothing visible until the block ends — snapshot and dots
+      // appear together, slowly. This is also what the INP warning flags.
+      await new Promise((r) => setTimeout(r, 0));
       const w = cameraPreview.clientWidth || 160;
       const h = cameraPreview.clientHeight || 120;
       faceOverlay.width = w;
@@ -579,6 +584,9 @@ async function testVisionPipeline() {
   const el = document.getElementById('visionTestHint');
   const say = (t) => { if (el) el.textContent = t; log('Vision test: ' + t); };
   say('Loading measurement models…');
+  // Let the status above paint before the blocking detect() call, or the
+  // whole click handler reads as one 2+ second UI freeze (INP).
+  await new Promise((r) => setTimeout(r, 0));
   const t0 = Date.now();
   try {
     await ensureEstimator();
