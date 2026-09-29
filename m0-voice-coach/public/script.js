@@ -378,6 +378,9 @@ debateCtaBtn.addEventListener('click', () => {
 const attemptStateEl = document.getElementById('attemptState');
 const cameraToggleBtn = document.getElementById('cameraToggleBtn');
 const cameraPreview = document.getElementById('cameraPreview');
+const faceOverlay = document.getElementById('faceOverlay');
+const faceStatusEl = document.getElementById('faceStatus');
+let overlayTimer = null;
 const cameraHintEl = document.getElementById('cameraHint');
 let cameraStream = null;
 // On-device visual observations for the current attempt (never images —
@@ -467,13 +470,15 @@ function startOverlayLoop() {
   stopOverlayLoop();
   faceOverlay.hidden = false;
   let ticking = false;
+  // 1500 ms cadence with small snapshots: each detect() blocks the main
+  // thread (~1-2 s on CPU fallback), so sparse + small keeps clicks snappy.
   overlayTimer = setInterval(async () => {
     if (!cameraStream) { stopOverlayLoop(); return; }
     if (ticking) return; // never pile up slow inferences
     ticking = true;
     try {
       const t0 = Date.now();
-      const lm = await estimateVideo(cameraPreview);
+      const lm = await estimateVideo(cameraPreview, 320);
       const ms = Date.now() - t0;
       // Show the exact snapshot the detector received: black/empty here
       // means a capture problem; a clear face with no detection means a
@@ -536,7 +541,7 @@ function startOverlayLoop() {
     } finally {
       ticking = false;
     }
-  }, 800);
+  }, 1500);
 }
 
 // Measure the live preview frame. Async (model inference); null when the

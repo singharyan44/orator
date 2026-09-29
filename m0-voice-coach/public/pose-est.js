@@ -117,12 +117,12 @@ function extractFaces(res) {
 // a canvas is the well-trodden path, direct video detection is not.
 // Returns landmarks array or null. Never throws for bad input (null);
 // model-load failures DO throw so callers can report them.
-async function estimateVideo(source) {
+async function estimateVideo(source, maxW) {
   const lm = await ensureEstimator();
   let target = source;
   try {
     if (source && source.tagName === 'VIDEO') {
-      const snap = snapshotVideo(source, 640);
+      const snap = snapshotVideo(source, maxW || 640);
       if (!snap) {
         if (VISION_DEBUG) lastEstimateDiag = { snap: null, note: 'no-snapshot' };
         return null;
