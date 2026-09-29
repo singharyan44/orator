@@ -1,4 +1,4 @@
-# Voice Coach — adaptive communication training
+# Orator — adaptive communication training
 
 One training loop, three coaches: **Speech** (prompts → feedback → retry →
 comparison), **Debate** (argue → opponent attacks your weakest point →

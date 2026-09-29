@@ -6,7 +6,7 @@ function complete(args) {
     ...args,
     extraHeaders: {
       'HTTP-Referer': 'https://localhost:3000/',
-      'X-Title': 'Voice Coach M1',
+      'X-Title': 'Orator',
     },
   });
 }

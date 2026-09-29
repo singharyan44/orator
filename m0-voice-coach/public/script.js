@@ -354,7 +354,7 @@ exportBtn.addEventListener('click', async () => {
   const blob = new Blob([text], { type: 'text/plain' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'voice-coach-session.txt';
+  a.download = 'orator-session.txt';
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);

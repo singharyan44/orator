@@ -1,4 +1,4 @@
-# Voice Coach — Hackathon Submission Pack (MVP)
+# Orator — Hackathon Submission Pack (MVP)
 
 ## Links
 - Live demo: https://voice-coach-seven.vercel.app
@@ -9,7 +9,7 @@ A real-time voice coach: speak, get specific feedback, retry, and see exactly
 what improved — powered by AssemblyAI streaming transcription.
 
 ## Description (copy-paste)
-Voice Coach turns speaking practice into a measurable, adaptive loop. Pick a
+Orator turns speaking practice into a measurable, adaptive loop. Pick a
 prompt, speak, and get instant analysis grounded in real metrics — pace (WPM),
 filler words, repeated words, and sentence structure — never generic praise.
 Each attempt ends with one clear retry focus; speak again and the app compares

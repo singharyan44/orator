@@ -1,7 +1,7 @@
-# Voice Coach — Slide Outline (mandatory PDF, <5 min talk)
+# Orator — Slide Outline (mandatory PDF, <5 min talk)
 
 ## Slide 1 — Title
-Voice Coach: an adaptive communication-training agent.
+Orator: an adaptive communication-training agent.
 Tagline: "Practice. Diagnose. Retry. Measure. Adapt."
 Demo URL + repo URL + team.
 

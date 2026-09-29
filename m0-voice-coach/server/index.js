@@ -100,7 +100,7 @@ app.post('/api/debate/voice-config', (req, res) => {
 // @vercel/node) require() this file instead, so skip listening there.
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Voice Coach M1 running at http://localhost:${PORT}`);
+    console.log(`Orator running at http://localhost:${PORT}`);
     console.log(`Token endpoint: http://localhost:${PORT}/token`);
     const coachCfg = getProviderConfig();
     console.log('Coach provider: ' + (coachCfg && !coachCfg.error

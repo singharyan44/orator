@@ -1,5 +1,5 @@
 {
-  "name": "voice-coach-m0",
+  "name": "orator",
   "version": "0.0.1",
   "description": "M1: speech coach loop (prompt -> speak -> transcript -> feedback -> retry -> comparison) over AssemblyAI Universal-3.5 Pro Streaming",
   "main": "server/index.js",

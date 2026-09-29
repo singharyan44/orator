@@ -1,4 +1,4 @@
-# M1 Plan — First Real Voice Coach Loop
+# M1 Plan — First Real Orator Loop
 
 Goal: Prompt → Speak → Live transcript → Final transcript → Attempt →
 Analysis → Feedback → Retry → Comparison → Next focus.

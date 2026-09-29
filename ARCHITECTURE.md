@@ -1,4 +1,4 @@
-# Voice Coach — Architecture
+# Orator — Architecture
 
 ## The loop (the product)
 ```text

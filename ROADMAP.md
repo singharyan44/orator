@@ -1,4 +1,4 @@
-# Voice Coach — 9-Day Milestone Plan (v3)
+# Orator — 9-Day Milestone Plan (v3)
 
 Context: **lablab AssemblyAI hackathon**. Thesis (the product): **the training
 loop itself** — Challenge → Speak → Observe → Diagnose → Coach → Retry →

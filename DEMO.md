@@ -1,4 +1,4 @@
-# Voice Coach — 90-Second Demo Script
+# Orator — 90-Second Demo Script
 
 Total: ~90 seconds. Everything below uses hands-free samples (no live mic
 needed on stage). Sound ON. Use Chrome/Edge. AI Coach selected.
