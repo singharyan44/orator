@@ -22,7 +22,7 @@ const { buildVoiceOpponentPrompt } = require('./voice-opponent');
 const { splitSpokenText } = require('../public/speech-out');
 const { formatElapsed, dayStats, withTimeout } = require('../public/stats');
 const { buildSessionText, verdictSummary } = require('../public/export-text');
-const { faceObservation, summarizeObservations, MP } = require('../public/pose-est');
+const { faceObservation, summarizeObservations, nativeFaceAvailable, MP } = require('../public/pose-est');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra) => {
@@ -474,6 +474,13 @@ if (fail) process.exit(1);
     const sum = summarizeObservations([neutral, down, right, { face: false }, closed]);
     ok('pose summary', sum.frames === 5 && sum.faces === 4 && sum.lookingDown === 1 && sum.headTurned === 1 && sum.eyesClosed === 1, JSON.stringify(sum));
     ok('pose summary empty', summarizeObservations(null).frames === 0, '');
+    ok('pose native guard', nativeFaceAvailable() === false, 'no FaceDetector in node');
+    const coarse = summarizeObservations([
+      { face: true, coarse: true, yaw: 'center', pitch: 'level', eyesOpen: true },
+      { face: true, coarse: true, yaw: 'center', pitch: 'level', eyesOpen: true },
+      neutral,
+    ]);
+    ok('pose coarse counts presence only', coarse.faces === 3 && coarse.lookingDown === 0 && coarse.headTurned === 0, JSON.stringify(coarse));
     // engine ignores frames/visionScreen entirely now (no separate vision call)
     let vCalls2 = 0;
     const lOK2 = async () => ({ strengths: ['l'], areas_to_improve: [], actionable_feedback: [], retry_focus: { focus: 'f', targets: [], tip: '' } });

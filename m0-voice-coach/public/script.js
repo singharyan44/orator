@@ -471,23 +471,35 @@ function startOverlayLoop() {
     if (ticking) return; // never pile up slow inferences
     ticking = true;
     try {
+      const t0 = Date.now();
       const lm = await estimateVideo(cameraPreview);
+      const ms = Date.now() - t0;
       const w = cameraPreview.clientWidth || 160;
       const h = cameraPreview.clientHeight || 120;
       faceOverlay.width = w;
       faceOverlay.height = h;
       const g = faceOverlay.getContext('2d');
       g.clearRect(0, 0, w, h);
-      if (!lm) {
-        faceStatusEl.textContent = 'Face: not detected — move into frame and light your face.';
+      if (lm) {
+        for (const p of lm) {
+          g.fillStyle = '#22d3ee';
+          g.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
+        }
+        const obs = faceObservation(lm);
+        faceStatusEl.textContent = 'Face: yes · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed') + ' (' + ms + 'ms)';
         return;
       }
-      for (const p of lm) {
-        g.fillStyle = '#22d3ee';
-        g.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
+      // MediaPipe saw nothing: try the native OS detector (presence only).
+      const box = await estimateBox(cameraPreview);
+      if (box) {
+        g.strokeStyle = '#4ade80';
+        g.lineWidth = 2;
+        g.strokeRect((box.x / cameraPreview.videoWidth) * w, (box.y / cameraPreview.videoHeight) * h,
+          (box.width / cameraPreview.videoWidth) * w, (box.height / cameraPreview.videoHeight) * h);
+        faceStatusEl.textContent = 'Face: yes (basic detection — landmarks unavailable) (' + ms + 'ms)';
+        return;
       }
-      const obs = faceObservation(lm);
-      faceStatusEl.textContent = 'Face: yes · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed');
+      faceStatusEl.textContent = 'Face: not detected — move into frame and light your face.';
     } catch (e) {
       faceStatusEl.textContent = 'Detection error: ' + e.message;
     } finally {
@@ -497,19 +509,23 @@ function startOverlayLoop() {
 }
 
 // Measure the live preview frame. Async (model inference); null when the
-// camera is off, unusable, or models failed to load. Never throws.
+// camera is off, unusable, or models failed to load. Falls back to native
+// OS detection (presence only, marked coarse so gaze counts skip it).
+// Never throws.
 async function observePreview() {
   try {
     if (!cameraStream || !cameraPreview.videoWidth) return null;
     const lm = await estimateVideo(cameraPreview);
-    if (!lm) return { face: false };
-    return faceObservation(lm);
+    if (lm) return faceObservation(lm);
+    const box = await estimateBox(cameraPreview);
+    if (box) return { face: true, coarse: true, yaw: 'center', pitch: 'level', eyesOpen: true };
+    return { face: false };
   } catch (e) { return null; }
 }
 
 // Sample-camera self-test: verifies the MediaPipe bundle + model load and
 // the detector runs, using a drawn test pattern (no face expected — a
-// drawing is not a person). Reports honestly what was found.
+// drawing is not a person). Reports full diagnostics for copy-paste.
 async function testVisionPipeline() {
   const el = document.getElementById('visionTestHint');
   const say = (t) => { if (el) el.textContent = t; log('Vision test: ' + t); };
@@ -517,7 +533,10 @@ async function testVisionPipeline() {
   const t0 = Date.now();
   try {
     await ensureEstimator();
-    const ms = Date.now() - t0;
+    const loadMs = Date.now() - t0;
+    const native = (typeof estimateBox === 'function');
+    let nativeSupport = 'unknown';
+    try { nativeSupport = String(nativeFaceAvailable()); } catch (e) { nativeSupport = 'check-failed'; }
     const c = document.createElement('canvas');
     c.width = 320; c.height = 240;
     const g = c.getContext('2d');
@@ -525,11 +544,16 @@ async function testVisionPipeline() {
     g.fillStyle = '#e8be96'; g.beginPath(); g.arc(160, 100, 40, 0, 7); g.fill();
     g.fillStyle = '#222'; g.fillRect(140, 88, 12, 12); g.fillRect(168, 88, 12, 12);
     g.fillStyle = '#22d3ee'; g.fillRect(60, 180, 200, 30);
+    const d0 = Date.now();
     const lm = await estimateVideo(c);
+    const detectMs = Date.now() - d0;
     const obs = lm ? faceObservation(lm) : { face: false };
-    say('Pipeline OK (models loaded in ' + ms + ' ms, test pattern: ' +
-      (obs.face ? 'face detected, gaze ' + obs.yaw + '/' + obs.pitch : 'no face detected — expected for a drawing') +
-      '). Point the camera at a face for real checks.');
+    const vw = (typeof cameraPreview !== 'undefined' && cameraPreview.videoWidth) || 0;
+    say('Pipeline OK (load ' + loadMs + 'ms, detect ' + detectMs + 'ms, ' +
+      'pattern: ' + (obs.face ? 'face?! gaze ' + obs.yaw + '/' + obs.pitch : 'no face — expected for a drawing') + ', ' +
+      'native detector: ' + nativeSupport + ', ' +
+      'video: ' + vw + 'px' + (cameraStream ? '' : ' (camera off)') + '). ' +
+      'For live results watch the dots + Face line above.');
   } catch (e) {
     say('Vision pipeline unavailable: ' + e.message + ' — speech coaching unaffected.');
   }

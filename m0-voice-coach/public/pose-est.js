@@ -64,12 +64,15 @@ function faceObservationInner(P) {
 
 function summarizeObservations(obs) {
   const list = Array.isArray(obs) ? obs : [];
+  // Coarse observations (native box fallback) prove presence only — gaze
+  // fields on them are defaults, never measurements, so gaze counts skip them.
+  const fine = list.filter((o) => o && o.face && !o.coarse);
   return {
     frames: list.length,
     faces: list.filter((o) => o && o.face).length,
-    lookingDown: list.filter((o) => o && o.face && o.pitch === 'down').length,
-    headTurned: list.filter((o) => o && o.face && o.yaw !== 'center').length,
-    eyesClosed: list.filter((o) => o && o.face && !o.eyesOpen).length,
+    lookingDown: fine.filter((o) => o.pitch === 'down').length,
+    headTurned: fine.filter((o) => o.yaw !== 'center').length,
+    eyesClosed: fine.filter((o) => !o.eyesOpen).length,
   };
 }
 
@@ -130,5 +133,33 @@ async function estimateVideo(source) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { faceObservation, summarizeObservations, ensureEstimator, estimateVideo, MP, IDX };
+  module.exports = { faceObservation, summarizeObservations, ensureEstimator, estimateVideo, estimateBox, nativeFaceAvailable, MP, IDX };
+}
+
+// ---- Native OS face detection (Chrome/Edge Shape Detection API) ----
+// Zero downloads, zero models to fetch: the browser asks the OS. Output is
+// a bounding box only — enough for PRESENCE, never gaze/eyes. Used as the
+// fallback when MediaPipe yields nothing, and reported as such.
+
+function nativeFaceAvailable() {
+  try {
+    return typeof FaceDetector !== 'undefined';
+  } catch (e) {
+    return false;
+  }
+}
+
+let nativeDetector = null;
+
+async function estimateBox(source) {
+  if (!nativeFaceAvailable()) return null;
+  try {
+    if (!nativeDetector) nativeDetector = new FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+    const faces = await nativeDetector.detect(source);
+    if (!faces || !faces.length || !faces[0].boundingBox) return null;
+    const b = faces[0].boundingBox;
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
+  } catch (e) {
+    return null;
+  }
 }
