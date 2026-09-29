@@ -121,13 +121,9 @@ async function estimateVideo(source) {
   let target = source;
   try {
     if (source && source.tagName === 'VIDEO') {
-      if (!source.videoWidth || (typeof source.readyState === 'number' && source.readyState < 2)) return null;
-      const scale = Math.min(1, 640 / source.videoWidth);
-      const c = document.createElement('canvas');
-      c.width = Math.max(2, Math.round(source.videoWidth * scale));
-      c.height = Math.max(2, Math.round(source.videoHeight * scale));
-      c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
-      target = c;
+      const snap = snapshotVideo(source, 640);
+      if (!snap) return null;
+      target = snap;
     }
     return extractFaces(await lm.detect(target));
   } catch (e) {
@@ -137,7 +133,25 @@ async function estimateVideo(source) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { faceObservation, summarizeObservations, ensureEstimator, estimateVideo, estimateBox, nativeFaceAvailable, MP, IDX };
+  module.exports = { faceObservation, summarizeObservations, ensureEstimator, estimateVideo, estimateBox, nativeFaceAvailable, snapshotVideo, MP, IDX };
+}
+
+// Snapshot a <video> to an offscreen canvas (capped width). Returns the
+// canvas, or null when the video has no current frame. Exported so the UI
+// can SHOW the exact pixels the detector receives (decisive debugging).
+function snapshotVideo(source, maxW) {
+  try {
+    if (!source || source.tagName !== 'VIDEO') return null;
+    if (!source.videoWidth || (typeof source.readyState === 'number' && source.readyState < 2)) return null;
+    const scale = Math.min(1, (maxW || 640) / source.videoWidth);
+    const c = document.createElement('canvas');
+    c.width = Math.max(2, Math.round(source.videoWidth * scale));
+    c.height = Math.max(2, Math.round(source.videoHeight * scale));
+    c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+    return c;
+  } catch (e) {
+    return null;
+  }
 }
 
 // ---- Native OS face detection (Chrome/Edge Shape Detection API) ----

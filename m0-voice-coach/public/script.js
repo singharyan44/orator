@@ -408,6 +408,7 @@ cameraToggleBtn.addEventListener('click', async () => {
     cameraPreview.srcObject = null;
     cameraPreview.hidden = true;
     faceOverlay.hidden = true;
+    document.getElementById('snapshotPreview').hidden = true;
     faceStatusEl.textContent = '';
     cameraToggleBtn.textContent = 'Enable camera';
     log('Camera off');
@@ -474,6 +475,17 @@ function startOverlayLoop() {
       const t0 = Date.now();
       const lm = await estimateVideo(cameraPreview);
       const ms = Date.now() - t0;
+      // Show the exact snapshot the detector received: black/empty here
+      // means a capture problem; a clear face with no detection means a
+      // sensitivity problem. Either way, no more guessing.
+      try {
+        const snap = snapshotVideo(cameraPreview);
+        const snapImg = document.getElementById('snapshotPreview');
+        if (snap && snapImg) {
+          snapImg.src = snap.toDataURL('image/jpeg', 0.7);
+          snapImg.hidden = false;
+        }
+      } catch (e) { /* preview is diagnostic-only */ }
       const w = cameraPreview.clientWidth || 160;
       const h = cameraPreview.clientHeight || 120;
       faceOverlay.width = w;
