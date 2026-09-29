@@ -161,6 +161,9 @@ h1 .mode-label { -webkit-text-fill-color: #22d3ee; }
 .cam-wrap { position: relative; display: inline-block; margin-top: 0.5rem; }
 .cam-wrap #cameraPreview { margin-top: 0; }
 #faceOverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* Detection composite: the exact frame the detector received, with dots
+   drawn on it. Internal pixels are set per frame; CSS only scales. */
+#snapshotPreview { border-radius: 0.5rem; border: 1px solid rgba(255,255,255,0.08); margin-top: 0.5rem; max-width: 100%; height: auto; }
 /* Coach Engine selector */
 .engine-row { align-items: center; }
 .engine-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; font-weight: 700; }

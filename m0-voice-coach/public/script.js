@@ -561,10 +561,15 @@ cameraToggleBtn.addEventListener('click', async () => {
   }
 });
 
-// Live face overlay: every ~800 ms while the camera is on, run detection
-// on the preview, draw landmark dots, and report the reading. This is the
-// visible proof of what the detector sees — if dots track your face, the
-// pipeline works; if nothing ever appears, detection truly fails here.
+// Live face display: every ~1500 ms while the camera is on, capture one
+// small frame, detect on those EXACT pixels (worker thread first), and draw
+// the dots/box ONTO that frame in the snapshot canvas below the preview.
+// Same buffer in = dots can never drift from the photo they sit on; a
+// frozen frame honestly reads as "that result is N seconds old". This is
+// the visible proof of what the detector sees.
+// Last good reading, redrawn dimmed on miss ticks so one failed frame
+// (head turn, blink) no longer blanks the display.
+let lastOverlaySeen = null; // { lm|null, blaze|null, at }
 function stopOverlayLoop() {
   if (overlayTimer) { clearInterval(overlayTimer); overlayTimer = null; }
   try {
@@ -575,48 +580,42 @@ function stopOverlayLoop() {
 
 function startOverlayLoop() {
   stopOverlayLoop();
-  faceOverlay.hidden = false;
+  // The live video stays clean; all visualization goes on the snapshot
+  // canvas (retired overlay stays hidden — one visualization, no ambiguity).
+  faceOverlay.hidden = true;
   let ticking = false;
-  // 1500 ms cadence with small snapshots: each detect() blocks the main
-  // thread (~1-2 s on CPU fallback), so sparse + small keeps clicks snappy.
   overlayTimer = setInterval(async () => {
     if (!cameraStream) { stopOverlayLoop(); return; }
     if (ticking) return; // never pile up slow inferences
     ticking = true;
     try {
       const t0 = Date.now();
-      // Show the exact snapshot the detector received: black/empty here
-      // means a capture problem; a clear face with no detection means a
+      const snapCv = document.getElementById('snapshotPreview');
+      // One 320px-wide capture per tick: the detector runs on this same
+      // buffer, so dots and photo agree by construction. Black/empty here
+      // means a capture problem; a clear face with no dots means a
       // sensitivity problem. Either way, no more guessing.
-      try {
-        const snap = snapshotVideo(cameraPreview);
-        const snapImg = document.getElementById('snapshotPreview');
-        if (snap && snapImg) {
-          snapImg.src = snap.toDataURL('image/jpeg', 0.7);
-          snapImg.hidden = false;
-        }
-      } catch (e) { /* preview is diagnostic-only */ }
-      // Yield so the snapshot above actually PAINTS before the blocking
-      // detect() call below (~1-2 s on CPU fallback). Without this, setting
-      // .src does nothing visible until the block ends — snapshot and dots
-      // appear together, slowly. This is also what the INP warning flags.
+      const snap = snapshotVideo(cameraPreview, 320);
+      if (!snap || !snapCv) {
+        faceStatusEl.textContent = 'Face: no frame — camera still starting?';
+        return;
+      }
+      snapCv.width = snap.width;
+      snapCv.height = snap.height;
+      snapCv.hidden = false;
+      const sg = snapCv.getContext('2d');
+      sg.drawImage(snap, 0, 0);
+      // Yield so the frame above actually PAINTS before inference below.
       await new Promise((r) => setTimeout(r, 0));
-      const w = cameraPreview.clientWidth || 160;
-      const h = cameraPreview.clientHeight || 120;
-      faceOverlay.width = w;
-      faceOverlay.height = h;
-      const g = faceOverlay.getContext('2d');
-      g.clearRect(0, 0, w, h);
-      // WORKER FIRST: the full inference (landmarks + Blaze fallback) runs
-      // off the UI thread, so clicks stay responsive no matter how slow
-      // detection is. The main-thread fast track below is only the fallback
-      // for browsers without worker support.
+      // WORKER FIRST: inference off the UI thread, so clicks stay
+      // responsive no matter how slow detection is. The main-thread path
+      // below is only the fallback for browsers without worker support.
+      faceStatusEl.textContent = 'Face: detecting…';
       let lm = null;
       let blaze = null;
       let viaWorker = false;
       try {
-        faceStatusEl.textContent = 'Face: detecting…';
-        const bmp = await createImageBitmap(cameraPreview);
+        const bmp = await createImageBitmap(snap);
         try {
           const res = await workerDetectBitmap(bmp, 25000);
           lm = res.landmarks || null;
@@ -635,49 +634,67 @@ function startOverlayLoop() {
         }
       } catch (e) { /* worker unavailable/failed: main-thread fallback below */ }
       if (!viaWorker) {
-        // FAST TRACK fallback: BlazeFace answers in tens of ms, so the box
-        // appears quickly; landmarks upgrade it when they finish.
         try {
-          const snapFast = snapshotVideo(cameraPreview, 320);
-          if (snapFast) blaze = await detectBlaze(snapFast);
+          blaze = await detectBlaze(snap);
         } catch (e) { /* landmarker path below */ }
-        if (blaze) {
-          g.strokeStyle = '#facc15';
-          g.lineWidth = 2;
-          g.strokeRect(blaze.x * w, blaze.y * h, blaze.width * w, blaze.height * h);
-          faceStatusEl.textContent = 'Face: yes (fast track)…';
-        }
-        lm = await estimateVideo(cameraPreview, 320);
-      } else if (blaze) {
-        g.strokeStyle = '#facc15';
-        g.lineWidth = 2;
-        g.strokeRect(blaze.x * w, blaze.y * h, blaze.width * w, blaze.height * h);
-        faceStatusEl.textContent = 'Face: yes (worker)…';
+        try {
+          const maybeLm = await estimateVideo(snap);
+          if (maybeLm) lm = maybeLm;
+        } catch (e) { /* keep blaze result; reported below */ }
       }
       const ms = Date.now() - t0;
+      const W = snap.width, H = snap.height;
       if (lm) {
-        g.clearRect(0, 0, w, h);
         for (const p of lm) {
-          g.fillStyle = '#22d3ee';
-          g.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
+          sg.fillStyle = '#22d3ee';
+          sg.fillRect(p.x * W - 1, p.y * H - 1, 2, 2);
         }
         const obs = faceObservation(lm);
+        lastOverlaySeen = { lm, blaze: null, at: Date.now() };
         faceStatusEl.textContent = 'Face: yes (landmarks) · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed') + ' (' + ms + 'ms)';
         return;
       }
-      // Landmarker saw nothing but Blaze did: keep the fast box, say so.
+      // Landmarker saw nothing but Blaze did: keep the box, say so.
       if (blaze) {
+        sg.strokeStyle = '#facc15';
+        sg.lineWidth = 2;
+        sg.strokeRect(blaze.x * W, blaze.y * H, blaze.width * W, blaze.height * H);
+        lastOverlaySeen = { lm: null, blaze, at: Date.now() };
         faceStatusEl.textContent = 'Face: yes (BlazeFace — landmarker missed it) (' + ms + 'ms)';
         return;
       }
       // MediaPipe saw nothing: try the native OS detector (presence only).
+      // Its box is in live-video pixels; scale it onto the snapshot.
       const box = await estimateBox(cameraPreview);
       if (box) {
-        g.strokeStyle = '#4ade80';
-        g.lineWidth = 2;
-        g.strokeRect((box.x / cameraPreview.videoWidth) * w, (box.y / cameraPreview.videoHeight) * h,
-          (box.width / cameraPreview.videoWidth) * w, (box.height / cameraPreview.videoHeight) * h);
+        const sx = W / (cameraPreview.videoWidth || 1);
+        const sy = H / (cameraPreview.videoHeight || 1);
+        sg.strokeStyle = '#4ade80';
+        sg.lineWidth = 2;
+        sg.strokeRect(box.x * sx, box.y * sy, box.width * sx, box.height * sy);
+        lastOverlaySeen = { lm: null, blaze: null, at: Date.now() };
         faceStatusEl.textContent = 'Face: yes (basic detection — landmarks unavailable) (' + ms + 'ms)';
+        return;
+      }
+      // Total miss on a fresh frame: re-draw the last good reading dimmed
+      // instead of going blank, and say how old it is.
+      const last = lastOverlaySeen;
+      if (last && (Date.now() - last.at) < 10000) {
+        const ago = Math.round((Date.now() - last.at) / 1000);
+        try {
+          sg.save();
+          sg.globalAlpha = 0.35;
+          if (last.lm) {
+            sg.fillStyle = '#22d3ee';
+            for (const p of last.lm) sg.fillRect(p.x * W - 1, p.y * H - 1, 2, 2);
+          } else if (last.blaze) {
+            sg.strokeStyle = '#facc15';
+            sg.lineWidth = 2;
+            sg.strokeRect(last.blaze.x * W, last.blaze.y * H, last.blaze.width * W, last.blaze.height * H);
+          }
+          sg.restore();
+        } catch (e) { /* dimmed redraw must never break status */ }
+        faceStatusEl.textContent = 'Face: looking away? last seen ' + ago + 's ago — face the camera and hold still.';
         return;
       }
       faceStatusEl.textContent = 'Face: not detected — move into frame and light your face.';
@@ -701,9 +718,13 @@ async function observePreview() {
   try {
     if (!cameraStream || !cameraPreview.videoWidth) return null;
     // Worker first: attempt observations must never freeze the Finish path.
+    // Same small snapshot the display loop uses: faster inference, and the
+    // exact pixels the user sees reported on.
     try {
       if (typeof createImageBitmap === 'function') {
-        const bmp = await createImageBitmap(cameraPreview);
+        const small = snapshotVideo(cameraPreview, 320);
+        if (!small) throw new Error('no frame');
+        const bmp = await createImageBitmap(small);
         try {
           const res = await workerDetectBitmap(bmp, 12000);
           if (res.landmarks) return faceObservation(res.landmarks);
