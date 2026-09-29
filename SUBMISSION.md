@@ -1,7 +1,7 @@
 # Orator — Hackathon Submission Pack (MVP)
 
 ## Links
-- Live demo: https://voice-coach-seven.vercel.app
+- Live demo: https://learnwithorator.vercel.app
 - Repo: https://github.com/singharyan44/orator
 
 ## Tagline
