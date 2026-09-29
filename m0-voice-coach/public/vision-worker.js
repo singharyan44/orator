@@ -14,24 +14,44 @@ const BLAZE_URL = 'https://storage.googleapis.com/mediapipe-models/face_detector
 let visionNs = null;
 let landmarker = null;
 let blaze = null;
+// GPU-first like the main thread (WebGL delegate; CUDA/ROCm do not exist
+// inside a web page). If the worker's GL context fails, we silently fall
+// back to WASM CPU — inference stays correct, just slower. The active
+// delegate rides back on every response so the UI can report it.
+let workerDelegate = 'CPU';
 
 async function ensureAll() {
   if (!visionNs) visionNs = await import(VISION_URL);
   const fileset = await visionNs.FilesetResolver.forVisionTasks(WASM_URL);
   if (!landmarker) {
-    landmarker = await visionNs.FaceLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: FACE_URL },
+    const makeOpts = (delegate) => ({
+      baseOptions: { modelAssetPath: FACE_URL, delegate },
       runningMode: 'IMAGE',
       numFaces: 1,
       minFaceDetectionConfidence: 0.3,
     });
+    try {
+      landmarker = await visionNs.FaceLandmarker.createFromOptions(fileset, makeOpts('GPU'));
+      workerDelegate = 'GPU';
+    } catch (e) {
+      landmarker = await visionNs.FaceLandmarker.createFromOptions(fileset, makeOpts('CPU'));
+      workerDelegate = 'CPU';
+    }
   }
   if (!blaze) {
-    blaze = await visionNs.FaceDetector.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: BLAZE_URL },
-      runningMode: 'IMAGE',
-      minDetectionConfidence: 0.3,
-    });
+    try {
+      blaze = await visionNs.FaceDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: BLAZE_URL, delegate: 'GPU' },
+        runningMode: 'IMAGE',
+        minDetectionConfidence: 0.3,
+      });
+    } catch (e) {
+      blaze = await visionNs.FaceDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: BLAZE_URL, delegate: 'CPU' },
+        runningMode: 'IMAGE',
+        minDetectionConfidence: 0.3,
+      });
+    }
   }
 }
 
@@ -71,9 +91,9 @@ onmessage = async (e) => {
         box = null;
       }
     }
-    postMessage({ id, ok: true, landmarks, box, ms: Date.now() - started });
+    postMessage({ id, ok: true, landmarks, box, ms: Date.now() - started, delegate: workerDelegate });
   } catch (err) {
-    postMessage({ id, ok: false, landmarks: null, box: null, ms: Date.now() - started, error: String((err && err.message) || err) });
+    postMessage({ id, ok: false, landmarks: null, box: null, ms: Date.now() - started, delegate: workerDelegate, error: String((err && err.message) || err) });
   } finally {
     try {
       if (bitmap && typeof bitmap.close === 'function') bitmap.close();

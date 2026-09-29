@@ -614,11 +614,13 @@ function startOverlayLoop() {
       let lm = null;
       let blaze = null;
       let viaWorker = false;
+      let workerDelegate = null;
       try {
         const bmp = await createImageBitmap(snap);
         try {
           const res = await workerDetectBitmap(bmp, 25000);
           lm = res.landmarks || null;
+          workerDelegate = res.delegate || 'CPU';
           if (!lm && res.box && res.box.bw) {
             blaze = {
               x: (res.box.x || 0) / res.box.bw,
@@ -651,7 +653,7 @@ function startOverlayLoop() {
         }
         const obs = faceObservation(lm);
         lastOverlaySeen = { lm, blaze: null, at: Date.now() };
-        faceStatusEl.textContent = 'Face: yes (landmarks) · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed') + ' (' + ms + 'ms)';
+        faceStatusEl.textContent = 'Face: yes (landmarks) · gaze ' + obs.yaw + '/' + obs.pitch + ' · eyes ' + (obs.eyesOpen ? 'open' : 'closed') + ' (' + ms + 'ms' + (viaWorker ? ' worker-' + workerDelegate : '') + ')';
         return;
       }
       // Landmarker saw nothing but Blaze did: keep the box, say so.
@@ -660,7 +662,7 @@ function startOverlayLoop() {
         sg.lineWidth = 2;
         sg.strokeRect(blaze.x * W, blaze.y * H, blaze.width * W, blaze.height * H);
         lastOverlaySeen = { lm: null, blaze, at: Date.now() };
-        faceStatusEl.textContent = 'Face: yes (BlazeFace — landmarker missed it) (' + ms + 'ms)';
+        faceStatusEl.textContent = 'Face: yes (BlazeFace — landmarker missed it) (' + ms + 'ms' + (viaWorker ? ' worker-' + workerDelegate : '') + ')';
         return;
       }
       // MediaPipe saw nothing: try the native OS detector (presence only).
@@ -765,7 +767,7 @@ async function testVisionPipeline() {
     let inv = 'n/a';
     try {
       const info = await describeEstimator();
-      inv = 'ctor=' + info.ctor + ' detect=' + info.hasDetect + ' detectForVideo=' + info.hasDetectForVideo;
+      inv = 'ctor=' + info.ctor + ' detect=' + info.hasDetect + ' detectForVideo=' + info.hasDetectForVideo + ' delegate=' + info.delegate + ' blaze=' + info.blazeDelegate;
     } catch (e) { inv = 'inventory-failed: ' + e.message; }
     const native = (typeof estimateBox === 'function');
     let nativeSupport = 'unknown';
@@ -783,6 +785,7 @@ async function testVisionPipeline() {
     let lm = null;
     let blaze = 'untested';
     let workerUsed = false;
+    let workerEngineT = 'CPU';
     try {
       const bmp = await createImageBitmap(c);
       try {
@@ -790,6 +793,7 @@ async function testVisionPipeline() {
         lm = res.landmarks || null;
         blaze = res.box ? 'face?!' : 'no face';
         workerUsed = true;
+        workerEngineT = res.delegate || 'CPU';
       } catch (e) {
         try { bmp.close(); } catch (_) { /* noop */ }
         throw e;
@@ -809,7 +813,7 @@ async function testVisionPipeline() {
       'estimator: ' + inv + ', ' +
       'pattern landmarks: ' + (obs.face ? 'face?! gaze ' + obs.yaw + '/' + obs.pitch : 'no face — expected for a drawing') + ', ' +
       'pattern blazeface: ' + blaze + ', ' +
-      'inference engine: ' + (workerUsed ? 'web worker (UI thread free)' : 'main thread (worker unavailable)') + ', ' +
+      'inference engine: ' + (workerUsed ? 'web worker ' + workerEngineT + ' (UI thread free)' : 'main thread (worker unavailable)') + ', ' +
       'native detector: ' + nativeSupport + ', ' +
       'video: ' + vw + 'px' + (cameraStream ? '' : ' (camera off)') + '). ' +
       'For live results watch the dots + Face line above.');

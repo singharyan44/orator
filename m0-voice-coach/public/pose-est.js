@@ -86,6 +86,11 @@ function summarizeObservations(obs) {
 }
 
 let landmarkerPromise = null;
+// Which compute the landmarker actually runs on. 'GPU' = WebGL delegate:
+// the browser's vendor-neutral path to NVIDIA, Radeon, Intel iGPU, Apple
+// Silicon alike (CUDA/ROCm do not exist inside a web page). Falls back to
+// WASM 'CPU' when WebGL is unavailable or refuses the model.
+let estimatorDelegate = 'CPU';
 
 // Loads the MediaPipe bundle + face model from CDN (throws on failure so
 // callers degrade to transcript-only coaching). Cached after first load.
@@ -97,8 +102,8 @@ async function ensureEstimator() {
   landmarkerPromise = (async () => {
     const mod = await import(/* webpackIgnore: true */ MP.BUNDLE_URL);
     const vision = await mod.FilesetResolver.forVisionTasks(MP.WASM_URL);
-    const lm = await mod.FaceLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: MP.FACE_MODEL_URL },
+    const makeOpts = (delegate) => ({
+      baseOptions: { modelAssetPath: MP.FACE_MODEL_URL, delegate },
       runningMode: 'IMAGE',
       numFaces: 1,
       // Lowered from the 0.5 default: dim rooms, small faces, and glasses
@@ -106,7 +111,15 @@ async function ensureEstimator() {
       // stray box is visible on the overlay); misses are expensive.
       minFaceDetectionConfidence: 0.3,
     });
-    return lm;
+    try {
+      const lm = await mod.FaceLandmarker.createFromOptions(vision, makeOpts('GPU'));
+      estimatorDelegate = 'GPU';
+      return lm;
+    } catch (e) {
+      const lm = await mod.FaceLandmarker.createFromOptions(vision, makeOpts('CPU'));
+      estimatorDelegate = 'CPU';
+      return lm;
+    }
   })().catch((e) => {
     landmarkerPromise = null;
     throw e;
@@ -161,18 +174,28 @@ async function estimateVideo(source, maxW) {
 // misses, the landmarker setup is at fault; if both miss, suspect the
 // input/lighting. Bounding box only (presence + rough position).
 let blazePromise = null;
+let blazeDelegate = 'CPU';
 
 async function ensureBlaze() {
   if (blazePromise) return blazePromise;
   blazePromise = (async () => {
     const mod = await import(/* webpackIgnore: true */ MP.BUNDLE_URL);
     const vision = await mod.FilesetResolver.forVisionTasks(MP.WASM_URL);
-    const det = await mod.FaceDetector.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: MP.BLAZE_URL },
+    const makeOpts = (delegate) => ({
+      baseOptions: { modelAssetPath: MP.BLAZE_URL, delegate },
       runningMode: 'IMAGE',
       minDetectionConfidence: 0.3,
     });
-    return det;
+    // Same GPU-first / CPU-fallback policy as the landmarker above.
+    try {
+      const det = await mod.FaceDetector.createFromOptions(vision, makeOpts('GPU'));
+      blazeDelegate = 'GPU';
+      return det;
+    } catch (e) {
+      const det = await mod.FaceDetector.createFromOptions(vision, makeOpts('CPU'));
+      blazeDelegate = 'CPU';
+      return det;
+    }
   })().catch((e) => {
     blazePromise = null;
     throw e;
@@ -244,6 +267,8 @@ async function describeEstimator() {
     ctor: (lm && lm.constructor && lm.constructor.name) || typeof lm,
     hasDetect: typeof (lm && lm.detect) === 'function',
     hasDetectForVideo: typeof (lm && lm.detectForVideo) === 'function',
+    delegate: estimatorDelegate,
+    blazeDelegate,
   };
 }
 
