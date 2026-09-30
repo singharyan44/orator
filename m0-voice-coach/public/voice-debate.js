@@ -116,7 +116,7 @@ async function startVoiceDebate(motionId, side) {
     const cfgRes = await fetch('/api/debate/voice-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ motionId, userSide: side }),
+      body: JSON.stringify({ motionId, userSide: side, language: (typeof selectedLanguage === 'function') ? selectedLanguage() : 'en' }),
     });
     const cfg = await cfgRes.json();
     if (!cfgRes.ok) throw new Error(cfg.error || ('Voice config returned ' + cfgRes.status));

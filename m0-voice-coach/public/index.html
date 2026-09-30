@@ -77,7 +77,18 @@
         <span class="engine-label">Coach Engine</span>
         <label class="engine-option"><input type="radio" name="coachEngine" value="ai" checked> AI Coach</label>
         <label class="engine-option"><input type="radio" name="coachEngine" value="rules"> Rules Coach</label>
+        <span class="engine-label">Language</span>
+        <select id="langSelect" aria-label="Response language for AI voices">
+          <option value="en" selected>English</option>
+          <option value="de">German</option>
+          <option value="fr">French</option>
+          <option value="es">Spanish</option>
+          <option value="it">Italian</option>
+          <option value="pt">Portuguese</option>
+          <option value="hi">Hindi</option>
+        </select>
       </div>
+      <div class="hint">AI voices (opponent, interviewer, samples, diagnoses) follow this language. Built-in fallbacks stay in English and are labeled.</div>
       <div class="row">
         <button id="startAttemptBtn" class="btn btn-small">Start attempt</button>
         <button id="finishAttemptBtn" class="btn btn-small" disabled>Finish attempt</button>

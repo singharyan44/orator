@@ -104,8 +104,19 @@ const STOCK_CHALLENGES = [
   'Respond directly to my last point. Which part of it is wrong, exactly?',
 ];
 
-function stockChallenge(round) {
-  return STOCK_CHALLENGES[round % STOCK_CHALLENGES.length];
+function quotePrefix(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  return 'You said "' + (t.length > 120 ? t.slice(0, 120) + '…' : t) + '" — ';
+}
+
+// Accepts a bare round number (legacy) or { round, lastUserText }: the stock
+// challenge stays fixed, but it now hooks onto the user's actual words, so
+// rules sparring follows the conversation instead of ignoring it.
+function stockChallenge(roundOrOpts) {
+  const o = (roundOrOpts && typeof roundOrOpts === 'object') ? roundOrOpts : { round: roundOrOpts };
+  const round = Number(o.round) || 0;
+  return quotePrefix(o.lastUserText) + STOCK_CHALLENGES[round % STOCK_CHALLENGES.length];
 }
 
 // Deterministic diagnosis fallback: delivery metrics + exchange counts only.

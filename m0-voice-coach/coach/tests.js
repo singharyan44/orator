@@ -14,10 +14,11 @@ const { buildHealth } = require('./health');
 const { buildProfile, skillVerdicts } = require('./profile');
 const { generateSampleText, staticSample } = require('./sample-text');
 const { assignNext } = require('./assign');
-const { MOTIONS, getMotion, validateOpponent, validateDiagnosis, stockChallenge, diagnoseRules } = require('./debate');
+const { MOTIONS, getMotion, validateOpponent, validateDiagnosis, stockChallenge, diagnoseRules, STOCK_CHALLENGES } = require('./debate');
 const { opponentReply, diagnoseDebate } = require('./debate-llm');
-const { ROLES, getRole, validateQuestion, validateInterviewDiagnosis, stockFollowup, diagnoseInterviewRules } = require('./interview');
+const { ROLES, getRole, validateQuestion, validateInterviewDiagnosis, stockFollowup, diagnoseInterviewRules, STOCK_FOLLOWUPS } = require('./interview');
 const { interviewerNext, diagnoseInterview } = require('./interview-llm');
+const { LANGS, normalizeLang, langEntry, languageLine } = require('./language');
 const { buildVoiceOpponentPrompt } = require('./voice-opponent');
 const { splitSpokenText } = require('../public/speech-out');
 const { formatElapsed, dayStats, withTimeout } = require('../public/stats');
@@ -329,6 +330,48 @@ if (fail) process.exit(1);
   }
 
   console.log('SAMPLE-RESULT pass=' + pass + ' fail=' + fail);
+
+  // ---------- response language + conversational memory ----------
+  {
+    ok('lang normalize', normalizeLang('de') === 'de' && normalizeLang('DE') === 'de' && normalizeLang('xx') === 'en' && normalizeLang() === 'en' && langEntry('hi').tts === 'hi-IN', '');
+    ok('lang list sane', LANGS.length >= 5 && LANGS.every((l) => l.code && l.name && l.tts) && new Set(LANGS.map((l) => l.code)).size === LANGS.length, '');
+    ok('lang line pins values, keeps keys', languageLine('de').includes('German') && languageLine('de').includes('JSON keys'), '');
+    // Capturing mock: records the system+user payload, returns canned content.
+    const seen = {};
+    const mockCapture = (content) => async (url, opts) => {
+      try {
+        const payload = JSON.parse(opts.body);
+        seen.system = payload.messages[0].content;
+        seen.user = payload.messages[1].content;
+      } catch (e) { /* ignore */ }
+      return { ok: true, json: async () => ({ choices: [{ message: { content } }] }) };
+    };
+    const envGroq = { env: { COACH_PROVIDER: 'groq', GROQ_API_KEY: 'k' }, timeoutMs: 2000 };
+    await opponentReply(
+      { motion: getMotion('ai-education'), userSide: 'for', userTranscript: 'KI hilft.', history: [{ speaker: 'opponent', text: 'alter Angriff' }], language: 'de' },
+      { ...envGroq, fetchImpl: mockCapture(JSON.stringify({ argument: { claim: 'c', evidence: [], reasoning: 'r' }, weakest_component: 'evidence', attack: 'Wo ist der Beleg für diese Behauptung? Nenne eine Studie mit echten Schülern und echten Ergebnissen, sonst bleibt es eine leere Aussage ohne Beweiskraft.' })) }
+    );
+    ok('opponent language+memory', seen.system.includes('German') && seen.user.includes('prior_exchanges') && seen.user.includes('alter Angriff'), '');
+    await interviewerNext(
+      { role: getRole('swe'), lastAnswer: 'On a livré à temps.', history: [{ speaker: 'interviewer', text: 'ancienne question' }], round: 1, language: 'fr' },
+      { ...envGroq, fetchImpl: mockCapture(JSON.stringify({ question: 'Quel exemple concret ?', intent: 'probe' })) }
+    );
+    ok('interviewer language+memory', seen.system.includes('French') && seen.user.includes('ancienne question'), '');
+    await generateSampleText(
+      { kind: 'interview-answer', topic: 'Backend-Rolle', history: [{ speaker: 'interviewer', text: 'Erzähl mal?' }], language: 'de' },
+      { ...envGroq, fetchImpl: mockCapture(JSON.stringify({ text: 'In meinem letzten Projekt haben wir pünktlich geliefert, weil wir die Tests automatisiert haben.' })) }
+    );
+    ok('sample language+memory', seen.system.includes('German') && seen.user.includes('prior_exchanges') && seen.user.includes('Erzähl mal?'), '');
+    const vp = buildVoiceOpponentPrompt(getMotion('ai-education'), 'for', 'es');
+    ok('voice prompt language', vp.system_prompt.includes('Spanish') && vp.greeting.length > 0, '');
+    ok('rules challenge quotes', stockChallenge({ round: 1, lastUserText: 'KI personalisiert alles' }).startsWith('You said "KI personalisiert alles"'), '');
+    ok('rules challenge legacy', stockChallenge(1) === STOCK_CHALLENGES[1 % STOCK_CHALLENGES.length], '');
+    ok('rules followup quotes', stockFollowup({ round: 0, lastAnswer: 'wir lieferten pünktlich' }).startsWith('You mentioned "wir lieferten pünktlich"'), '');
+    ok('rules followup legacy', stockFollowup(2) === STOCK_FOLLOWUPS[2 % STOCK_FOLLOWUPS.length], '');
+    ok('static rotation', staticSample('interview-answer', 1) !== staticSample('interview-answer', 0) && staticSample('interview-answer') === staticSample('interview-answer', 0), '');
+  }
+
+  console.log('LANGMEM-RESULT pass=' + pass + ' fail=' + fail);
 
   // ---------- personal profile ----------
   {

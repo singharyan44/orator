@@ -66,7 +66,9 @@ function interviewConnected() {
 function updateInterviewButtons() {
   const connected = interviewConnected();
   const busy = interviewRecorder.isRecording() || interviewRecorder.isFinishing() || interviewThinking;
-  answerStartBtn.disabled = busy || !connected;
+  // Echo guard (safe when script.js hasn't defined the flag yet).
+  const speaking = typeof speechPromptPlaying !== 'undefined' && speechPromptPlaying;
+  answerStartBtn.disabled = busy || !connected || speaking;
   answerFinishBtn.disabled = !interviewRecorder.isRecording() || !connected;
   const answered = interviewExchanges.filter((e) => e.speaker === 'candidate').length;
   diagnoseInterviewBtn.disabled = busy || answered === 0;
@@ -121,6 +123,7 @@ async function fetchInterviewQuestion(lastAnswer, durationMs, turnCount) {
         roleId: interviewRole.id,
         lastAnswer: lastAnswer || null,
         history: interviewExchanges,
+        language: (typeof selectedLanguage === 'function') ? selectedLanguage() : 'en',
         coachEngine: selectedEngine(),
         durationMs: durationMs || 0,
         turnCount: turnCount || 0,
@@ -166,6 +169,12 @@ async function fetchInterviewQuestion(lastAnswer, durationMs, turnCount) {
 answerStartBtn.addEventListener('click', () => {
   if (!interviewRole || interviewRecorder.isRecording() || interviewRecorder.isFinishing() || interviewThinking) return;
   if (!interviewConnected()) { interviewHintEl.textContent = 'Connect first (same connection as Speech).'; return; }
+  // Echo guard: starting while the interviewer's voice plays captures it
+  // into the answer (this exact bug shipped in the demo video).
+  if (typeof speechPromptPlaying !== 'undefined' && speechPromptPlaying) {
+    interviewHintEl.textContent = 'Wait for the interviewer’s voice to finish — otherwise it lands in your transcript.';
+    return;
+  }
   interviewRecorder.start(Date.now());
   if (typeof recorder !== 'undefined') recorder.resetToIdle();
   if (typeof debateRecorder !== 'undefined') debateRecorder.resetToIdle();
@@ -233,6 +242,7 @@ diagnoseInterviewBtn.addEventListener('click', async () => {
         roleId: interviewRole.id,
         exchanges: interviewExchanges,
         delivery: interviewDelivery,
+        language: (typeof selectedLanguage === 'function') ? selectedLanguage() : 'en',
         coachEngine: selectedEngine(),
         previous: lastInterview,
       }),
@@ -348,6 +358,8 @@ async function playInterviewSample() {
       body: JSON.stringify({
         kind: 'interview-answer',
         topic: interviewRole.title,
+        history: interviewExchanges,
+        language: (typeof selectedLanguage === 'function') ? selectedLanguage() : 'en',
         coachEngine: selectedEngine(),
       }),
     });
@@ -356,7 +368,7 @@ async function playInterviewSample() {
     interviewSampleHintEl.textContent = (data.source === 'llm' ? 'Fresh AI-written answer' : 'Built-in answer') +
       ' — listen, your live mic captures it. (Sound on!)';
     log('Interview sample (' + data.source + ')');
-    await speakText(data.text);
+    await speakText(data.text, 'sample');
     interviewSampleHintEl.textContent = 'Sample finished speaking.';
   } catch (e) {
     interviewSampleHintEl.textContent = 'Sample failed: ' + e.message;

@@ -7,6 +7,7 @@ const { getProviderConfig } = require('./llm/provider');
 const openrouter = require('./llm/openrouter');
 const groq = require('./llm/groq');
 const { validateOpponent, validateDiagnosis } = require('./debate');
+const { languageLine } = require('./language');
 
 const PROVIDER_MODULES = { openrouter, groq };
 
@@ -54,7 +55,7 @@ STRICT RULES:
 }
 Use "evidence": [] when they offered none — say so in the attack.`;
 
-async function opponentReply({ motion, userSide, userTranscript, history }, opts) {
+async function opponentReply({ motion, userSide, userTranscript, history, language }, opts) {
   const yourSide = userSide === 'for' ? 'against' : 'for';
   const recent = (history || []).slice(-6).map((h) => ({
     speaker: h.speaker,
@@ -67,7 +68,7 @@ async function opponentReply({ motion, userSide, userTranscript, history }, opts
     user_transcript: short(userTranscript, 1500),
     prior_exchanges: recent,
   });
-  const { text, config } = await callLLM({ system: OPPONENT_SYSTEM, user, opts });
+  const { text, config } = await callLLM({ system: OPPONENT_SYSTEM + '\n' + languageLine(language), user, opts });
   const validated = validateOpponent(parseJSON(text));
   return { ...validated, provider: config.name, model: config.model };
 }
@@ -90,7 +91,7 @@ STRICT RULES:
 }
 1-3 items per list. Each item under 200 characters.`;
 
-async function diagnoseDebate({ motion, userSide, exchanges, delivery }, opts) {
+async function diagnoseDebate({ motion, userSide, exchanges, delivery, language }, opts) {
   const user = JSON.stringify({
     motion: motion.motion,
     user_side: userSide,
@@ -98,7 +99,7 @@ async function diagnoseDebate({ motion, userSide, exchanges, delivery }, opts) {
     exchanges: (exchanges || []).map((e) => ({ speaker: e.speaker, text: short(e.text, 800) })),
     delivery_per_user_turn: delivery || [],
   });
-  const { text, config } = await callLLM({ system: DIAGNOSIS_SYSTEM, user, opts });
+  const { text, config } = await callLLM({ system: DIAGNOSIS_SYSTEM + '\n' + languageLine(language), user, opts });
   const validated = validateDiagnosis(parseJSON(text));
   return { ...validated, provider: config.name, model: config.model };
 }

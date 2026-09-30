@@ -133,8 +133,19 @@ const STOCK_FOLLOWUPS = [
   'What numbers or outcomes prove it worked?',
 ];
 
-function stockFollowup(round) {
-  return STOCK_FOLLOWUPS[round % STOCK_FOLLOWUPS.length];
+function quotePrefix(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  return 'You mentioned "' + (t.length > 120 ? t.slice(0, 120) + '…' : t) + '" — ';
+}
+
+// Same shape as debate's stockChallenge: bare round number (legacy) or
+// { round, lastAnswer }. Templates stay fixed; the quote hooks them onto
+// the candidate's actual answer.
+function stockFollowup(roundOrOpts) {
+  const o = (roundOrOpts && typeof roundOrOpts === 'object') ? roundOrOpts : { round: roundOrOpts };
+  const round = Number(o.round) || 0;
+  return quotePrefix(o.lastAnswer) + STOCK_FOLLOWUPS[round % STOCK_FOLLOWUPS.length];
 }
 
 // Deterministic diagnosis fallback: delivery metrics + counts only.

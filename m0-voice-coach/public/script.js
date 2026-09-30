@@ -1151,7 +1151,7 @@ async function playSample(kind, label, topic) {
     sampleHintEl.textContent = (data.source === 'llm' ? 'Fresh AI-written sample' : 'Built-in sample') +
       ' — listen, your live mic captures it like real speech. (Sound on!)';
     log('Sample (' + data.source + '): ' + data.text.slice(0, 80) + '…');
-    await speakText(data.text);
+    await speakText(data.text, 'sample');
     sampleHintEl.textContent = 'Sample finished speaking.';
   } catch (e) {
     sampleHintEl.textContent = 'Sample failed: ' + e.message;
@@ -1190,17 +1190,36 @@ function ensureVoices() {
   return cachedVoices;
 }
 
-function pickVoice(voices) {
-  const en = (voices || []).filter((v) => v.lang && v.lang.toLowerCase().startsWith('en'));
-  if (!en.length) return null;
-  return en.find((v) => v.localService) || en.find((v) => v.default) || en[0];
+// Response language for all AI voices (opponent, interviewer, samples,
+// diagnoses). Read live so mid-session switches apply to the next request.
+// Mirrors coach/language.js LANGS; unknown values fall back to English.
+const TTS_LOCALE = { en: 'en-US', de: 'de-DE', fr: 'fr-FR', es: 'es-ES', it: 'it-IT', pt: 'pt-PT', hi: 'hi-IN' };
+function selectedLanguage() {
+  try {
+    const sel = document.getElementById('langSelect');
+    const v = sel && sel.value ? String(sel.value).toLowerCase().slice(0, 2) : 'en';
+    return TTS_LOCALE[v] ? v : 'en';
+  } catch (e) { return 'en'; }
 }
 
-function speakChunk(text, voice) {
+function pickVoice(voices, code) {
+  const list = (voices || []).filter((v) => v.lang && v.lang.toLowerCase().startsWith(code));
+  if (!list.length) return null;
+  return list.find((v) => v.localService) || list.find((v) => v.default) || list[0];
+}
+
+// True while PROMPT audio (opponent attack, interviewer question) is playing:
+// recording during it captures the prompt into the answer (mic echo), so
+// Speak buttons stay disabled until it ends. Sample playback is kind
+// 'sample' and intentionally overlaps recording — never gated.
+let speechPromptPlaying = false;
+let voiceWarnedFor = null;
+
+function speakChunk(text, voice, locale) {
   return new Promise((resolve) => {
     try {
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'en-US';
+      u.lang = locale || 'en-US';
       u.rate = 1;
       if (voice) u.voice = voice;
       let done = false;
@@ -1225,18 +1244,46 @@ function speakChunk(text, voice) {
   });
 }
 
-async function speakText(text) {
+async function speakText(text, kind) {
+  // kind 'sample' (default): hands-free capture audio, overlaps recording by
+  // design. kind 'prompt': opponent/interviewer voice — sets
+  // speechPromptPlaying so Speak buttons stay disabled (echo guard).
+  const isPrompt = kind !== 'sample';
   try {
     if (!('speechSynthesis' in window)) return;
     speechSynthesis.cancel();
+    const code = (typeof selectedLanguage === 'function') ? selectedLanguage() : 'en';
+    const locale = TTS_LOCALE[code] || 'en-US';
     const voices = await ensureVoices();
-    const voice = pickVoice(voices);
-    const chunks = splitSpokenText(text, 220);
-    for (const chunk of chunks) {
-      if (!ws || ws.readyState !== WebSocket.OPEN) break;
-      await speakChunk(chunk, voice);
+    const voice = pickVoice(voices, code);
+    if (!voice && voiceWarnedFor !== code) {
+      voiceWarnedFor = code;
+      log('No ' + code + ' voice installed — using the browser default voice; text is always shown too.');
     }
-  } catch (e) { /* resolve silently — speech is a test aid, never fatal */ }
+    const chunks = splitSpokenText(text, 220);
+    if (isPrompt) speechPromptPlaying = true;
+    try {
+      for (const chunk of chunks) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) break;
+        await speakChunk(chunk, voice, locale);
+      }
+    } finally {
+      if (isPrompt) {
+        speechPromptPlaying = false;
+        // Re-enable Speak buttons the echo guard disabled (guarded: these
+        // live in debate.js / interview.js, which may load in any order).
+        try {
+          if (typeof updateDebateButtons === 'function') updateDebateButtons();
+        } catch (e) { /* ignore */ }
+        try {
+          if (typeof updateInterviewButtons === 'function') updateInterviewButtons();
+        } catch (e) { /* ignore */ }
+      }
+    }
+  } catch (e) {
+    speechPromptPlaying = false;
+    /* resolve silently — speech is a test aid, never fatal */
+  }
 }
 
 async function checkHealth() {

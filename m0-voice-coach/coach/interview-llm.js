@@ -6,6 +6,7 @@ const { getProviderConfig } = require('./llm/provider');
 const openrouter = require('./llm/openrouter');
 const groq = require('./llm/groq');
 const { validateQuestion, validateInterviewDiagnosis } = require('./interview');
+const { languageLine } = require('./language');
 
 const PROVIDER_MODULES = { openrouter, groq };
 
@@ -52,7 +53,7 @@ STRICT RULES:
   "intent": "opener | clarification | probe | pressure | curveball"
 }`;
 
-async function interviewerNext({ role, lastAnswer, history, round }, opts) {
+async function interviewerNext({ role, lastAnswer, history, round, language }, opts) {
   const user = JSON.stringify({
     role: role.title,
     focus_areas: role.focus,
@@ -60,7 +61,7 @@ async function interviewerNext({ role, lastAnswer, history, round }, opts) {
     last_answer: lastAnswer ? short(lastAnswer, 1200) : null,
     prior_exchanges: (history || []).slice(-6).map((h) => ({ speaker: h.speaker, text: short(h.text, 600) })),
   });
-  const { text, config } = await callLLM({ system: INTERVIEWER_SYSTEM, user, opts });
+  const { text, config } = await callLLM({ system: INTERVIEWER_SYSTEM + '\n' + languageLine(language), user, opts });
   const validated = validateQuestion(parseJSON(text));
   return { ...validated, provider: config.name, model: config.model };
 }
@@ -83,14 +84,14 @@ STRICT RULES:
 }
 1-3 items per list. Each item under 200 characters.`;
 
-async function diagnoseInterview({ role, exchanges, delivery }, opts) {
+async function diagnoseInterview({ role, exchanges, delivery, language }, opts) {
   const user = JSON.stringify({
     role: role.title,
     questions_answered: exchanges.filter((e) => e.speaker === 'candidate').length,
     exchanges: (exchanges || []).map((e) => ({ speaker: e.speaker, text: short(e.text, 700) })),
     delivery_per_answer: delivery || [],
   });
-  const { text, config } = await callLLM({ system: INTERVIEW_DIAGNOSIS_SYSTEM, user, opts });
+  const { text, config } = await callLLM({ system: INTERVIEW_DIAGNOSIS_SYSTEM + '\n' + languageLine(language), user, opts });
   const validated = validateInterviewDiagnosis(parseJSON(text));
   return { ...validated, provider: config.name, model: config.model };
 }

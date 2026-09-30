@@ -77,6 +77,8 @@ function debateConnected() {
 function updateDebateButtons() {
   const connected = debateConnected();
   const busy = debateRecorder.isRecording() || debateRecorder.isFinishing() || debateThinking;
+  // Echo guard (safe when script.js hasn't defined the flag yet).
+  const speaking = typeof speechPromptPlaying !== 'undefined' && speechPromptPlaying;
   const live = debateExchanges.length > 0;
   const voice = typeof voiceModeActive === 'function' && voiceModeActive();
   const endVoiceBtn = document.getElementById('endVoiceBtn');
@@ -85,7 +87,7 @@ function updateDebateButtons() {
   debateSampleBtn.hidden = voice;
   diagnoseBtn.hidden = voice;
   if (endVoiceBtn) endVoiceBtn.hidden = !voice;
-  roundStartBtn.disabled = busy || !connected;
+  roundStartBtn.disabled = busy || !connected || speaking;
   roundFinishBtn.disabled = !debateRecorder.isRecording() || !connected;
   const userTurns = debateExchanges.filter((e) => e.speaker === 'user').length;
   diagnoseBtn.disabled = busy || userTurns === 0;
@@ -120,6 +122,8 @@ async function playDebateSample() {
         kind: 'debate-' + debateSide,
         motion: debateMotion.motion,
         side: debateSide,
+        history: debateExchanges,
+        language: (typeof selectedLanguage === 'function') ? selectedLanguage() : 'en',
         coachEngine: selectedEngine(),
       }),
     });
@@ -128,7 +132,7 @@ async function playDebateSample() {
     debateSampleHintEl.textContent = (data.source === 'llm' ? 'Fresh AI-written argument' : 'Built-in argument') +
       ' for YOUR side — listen, your live mic captures it. (Sound on!)';
     log('Debate sample (' + data.source + '): ' + data.text.slice(0, 80) + '…');
-    await speakText(data.text);
+    await speakText(data.text, 'sample');
     debateSampleHintEl.textContent = 'Sample finished speaking.';
   } catch (e) {
     debateSampleHintEl.textContent = 'Sample failed: ' + e.message;
@@ -191,6 +195,12 @@ debateStartBtn.addEventListener('click', () => {
 roundStartBtn.addEventListener('click', () => {
   if (!debateMotion || debateRecorder.isRecording() || debateRecorder.isFinishing() || debateThinking) return;
   if (!debateConnected()) { debateHintEl.textContent = 'Connect first (same connection as Speech).'; return; }
+  // Echo guard: starting while the opponent's voice plays captures it into
+  // the round. Samples are exempt (kind 'sample' never sets this flag).
+  if (typeof speechPromptPlaying !== 'undefined' && speechPromptPlaying) {
+    debateHintEl.textContent = 'Wait for the opponent’s voice to finish — otherwise it lands in your transcript.';
+    return;
+  }
   debateRecorder.start(Date.now());
   if (typeof recorder !== 'undefined') recorder.resetToIdle();
   if (typeof interviewRecorder !== 'undefined') interviewRecorder.resetToIdle();
@@ -252,6 +262,7 @@ async function submitDebateRound({ transcript, turnCount, durationMs }) {
         userSide: debateSide,
         userTranscript: transcript,
         history: debateExchanges,
+        language: (typeof selectedLanguage === 'function') ? selectedLanguage() : 'en',
         coachEngine: selectedEngine(),
         durationMs,
         turnCount,
@@ -313,6 +324,7 @@ diagnoseBtn.addEventListener('click', async () => {
         userSide: debateSide,
         exchanges: debateExchanges,
         delivery: debateDelivery,
+        language: (typeof selectedLanguage === 'function') ? selectedLanguage() : 'en',
         coachEngine: selectedEngine(),
       }),
     });

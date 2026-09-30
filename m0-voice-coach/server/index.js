@@ -18,6 +18,14 @@ const { ROLES, getRole, stockFollowup, diagnoseInterviewRules } = require('../co
 const { interviewerNext, diagnoseInterview } = require('../coach/interview-llm');
 const { buildVoiceOpponentPrompt } = require('../coach/voice-opponent');
 const { compareAttempts } = require('../coach/compare');
+const { normalizeLang } = require('../coach/language');
+
+// UI language preference, normalized once per request. AI-generated text
+// follows it; deterministic rules/static fallbacks stay in authored
+// English (labeled as such in the UI).
+function reqLang(body) {
+  return normalizeLang(body && body.language);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -93,7 +101,7 @@ app.post('/api/debate/voice-config', (req, res) => {
   if (body.userSide !== 'for' && body.userSide !== 'against') {
     return res.status(400).json({ error: 'userSide must be "for" or "against".' });
   }
-  res.json(buildVoiceOpponentPrompt(motion, body.userSide));
+  res.json(buildVoiceOpponentPrompt(motion, body.userSide, reqLang(body)));
 });
 
 // Local runs (`npm start`) listen here. Serverless hosts (Vercel
@@ -143,8 +151,10 @@ app.post('/api/sample-text', async (req, res) => {
   const body = req.body || {};
   const kind = body.kind;
   if (!staticSampleSafe(kind)) return res.status(400).json({ error: 'Unknown sample kind.' });
+  const history = Array.isArray(body.history) ? body.history.slice(-8) : [];
+  const language = reqLang(body);
   if (body.coachEngine === 'rules') {
-    return res.json({ text: staticSample(kind), source: 'static' });
+    return res.json({ text: staticSample(kind, history.length), source: 'static' });
   }
   try {
     const out = await generateSampleText({
@@ -152,11 +162,13 @@ app.post('/api/sample-text', async (req, res) => {
       topic: body.topic,
       motion: body.motion,
       side: body.side,
+      history,
+      language,
     });
     res.json({ text: out.text, source: 'llm' });
   } catch (err) {
     console.error('Sample-text LLM unavailable, using static fallback:', err.message);
-    res.json({ text: staticSample(kind), source: 'static', fallback: true });
+    res.json({ text: staticSample(kind, history.length), source: 'static', fallback: true });
   }
 });
 
@@ -298,6 +310,7 @@ app.post('/api/debate/opponent', async (req, res) => {
   const history = Array.isArray(body.history) ? body.history.slice(-12) : [];
   // Delivery metrics for this spoken turn (powers diagnosis + history).
   const roundMs = Number(body.durationMs);
+  const language = reqLang(body);
   const metrics = computeMetrics({
     transcript,
     durationMs: Number.isFinite(roundMs) && roundMs >= 0 ? roundMs : 0,
@@ -307,7 +320,7 @@ app.post('/api/debate/opponent', async (req, res) => {
   if (debateEngine(req) === 'rules') {
     const round = history.filter((h) => h.speaker === 'user').length;
     return res.json({
-      attack: stockChallenge(round),
+      attack: stockChallenge({ round, lastUserText: transcript }),
       weakestComponent: null,
       argument: null,
       source: 'rules',
@@ -320,6 +333,7 @@ app.post('/api/debate/opponent', async (req, res) => {
       userSide: body.userSide,
       userTranscript: transcript,
       history,
+      language,
     });
     res.json({
       attack: out.attack,
@@ -332,7 +346,7 @@ app.post('/api/debate/opponent', async (req, res) => {
     console.error('Debate opponent unavailable, using stock challenge:', err.message);
     const round = history.filter((h) => h.speaker === 'user').length;
     res.json({
-      attack: stockChallenge(round),
+      attack: stockChallenge({ round, lastUserText: transcript }),
       weakestComponent: null,
       argument: null,
       source: 'rules',
@@ -372,7 +386,7 @@ app.post('/api/debate/diagnose', async (req, res) => {
     return res.json({ diagnosis: diagnoseRules({ userTurns: answers.map((t) => t.text), metricsList: delivery }), source: 'rules', delivery });
   }
   try {
-    const out = await diagnoseDebate({ motion, userSide: body.userSide, exchanges, delivery });
+    const out = await diagnoseDebate({ motion, userSide: body.userSide, exchanges, delivery, language: reqLang(body) });
     res.json({ diagnosis: out, source: 'llm', delivery });
   } catch (err) {
     console.error('Debate diagnosis unavailable, using deterministic fallback:', err.message);
@@ -404,6 +418,7 @@ app.post('/api/interview/question', async (req, res) => {
   const history = Array.isArray(body.history) ? body.history.slice(-12) : [];
   const round = history.filter((h) => h.speaker === 'candidate').length;
   const lastAnswer = typeof body.lastAnswer === 'string' && body.lastAnswer.trim() ? body.lastAnswer.trim().slice(0, 8000) : null;
+  const language = reqLang(body);
   // Delivery metrics for the just-finished answer (powers diagnosis + history).
   const ansMs = Number(body.durationMs);
   const ansTurns = Number(body.turnCount);
@@ -415,19 +430,19 @@ app.post('/api/interview/question', async (req, res) => {
 
   if (interviewEngine(req) === 'rules') {
     return res.json({
-      question: lastAnswer ? stockFollowup(round) : role.opener,
+      question: lastAnswer ? stockFollowup({ round, lastAnswer }) : role.opener,
       intent: lastAnswer ? 'probe' : 'opener',
       source: 'rules',
       metrics: answerMetrics,
     });
   }
   try {
-    const out = await interviewerNext({ role, lastAnswer, history, round });
+    const out = await interviewerNext({ role, lastAnswer, history, round, language });
     res.json({ question: out.question, intent: out.intent, source: 'llm', metrics: answerMetrics });
   } catch (err) {
     console.error('Interviewer unavailable, using stock question:', err.message);
     res.json({
-      question: lastAnswer ? stockFollowup(round) : role.opener,
+      question: lastAnswer ? stockFollowup({ round, lastAnswer }) : role.opener,
       intent: lastAnswer ? 'probe' : 'opener',
       source: 'rules',
       fallback: true,
@@ -454,7 +469,7 @@ app.post('/api/interview/diagnose', async (req, res) => {
     source = 'rules';
   } else {
     try {
-      diagnosis = await diagnoseInterview({ role, exchanges, delivery });
+      diagnosis = await diagnoseInterview({ role, exchanges, delivery, language: reqLang(body) });
       source = 'llm';
     } catch (err) {
       console.error('Interview diagnosis unavailable, using deterministic fallback:', err.message);
