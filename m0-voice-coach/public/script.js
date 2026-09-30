@@ -469,6 +469,40 @@ async function workerDetectBitmap(bitmap, timeoutMs) {
   if (!res.ok) throw new Error(res.error || 'vision worker failed');
   return res;
 }
+// ---- Weak-device policy (measured, never stereotyped) ----
+// Phones, CPU-only browsers (GPU disabled/blocklisted), and slow iGPUs all
+// surface the same way: CPU delegate and/or seconds-per-frame. The first
+// completed inference calibrates once; on weak devices the laggy part
+// (live dots) is removed while the useful part (attempt snapshots + speech
+// coaching) keeps working. The reason is always shown, with an override.
+let visionPerf = null; // { weak, delegate, ms, reason } — set once
+let visionForceLive = false; // user override: live dots even on weak devices
+function assessVision(delegate, ms) {
+  const cpu = String(delegate || 'CPU').toUpperCase() !== 'GPU';
+  const slow = Number(ms) > 1500;
+  const weak = cpu || slow;
+  const parts = [];
+  parts.push(cpu ? 'CPU-only inference (browser GPU unavailable or disabled)' : String(delegate) + ' delegate');
+  if (slow) parts.push('~' + (Math.round(Number(ms) / 100) / 10) + 's per frame');
+  try {
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '')) parts.push('mobile device');
+  } catch (e) { /* UA hint is supplementary only */ }
+  visionPerf = { weak, delegate: delegate || 'CPU', ms: Number(ms) || 0, reason: parts.join('; ') };
+  if (weak) applyWeakVisionPolicy();
+  return visionPerf;
+}
+function applyWeakVisionPolicy() {
+  if (!visionPerf || !visionPerf.weak || visionForceLive) return;
+  stopOverlayLoop();
+  try {
+    const btn = document.getElementById('forceOverlayBtn');
+    if (btn) btn.hidden = false;
+  } catch (e) { /* override button is best-effort */ }
+  if (typeof cameraHintEl !== 'undefined' && cameraHintEl) {
+    cameraHintEl.textContent = 'Slow device (' + visionPerf.reason + '): live dots auto-paused — they would lag seconds per frame. Attempt snapshots and speech coaching still work.';
+  }
+  log('Weak vision device: live dots paused (' + visionPerf.reason + ')');
+}
 // Fire-and-forget worker + model warm-up at camera-on, so overlay ticks
 // find a hot worker instead of paying the download during a tick.
 function warmVisionWorker() {
@@ -544,7 +578,14 @@ cameraToggleBtn.addEventListener('click', async () => {
       () => {
         cameraHintEl.textContent = 'Camera on — on-device measurement ready.';
         log('Vision models loaded');
-        startOverlayLoop();
+        if (visionPerf && visionPerf.weak && !visionForceLive) {
+          // Known-weak device (assessed earlier, e.g. via the vision test):
+          // skip the laggy live loop; attempt snapshots still run.
+          applyWeakVisionPolicy();
+          log('Live dots stay paused — weak device');
+        } else {
+          startOverlayLoop();
+        }
       },
       (e) => { cameraHintEl.textContent = 'Camera on, measurement unavailable (model download failed) — speech coaching unaffected.'; log('Estimator load failed: ' + e.message); }
     );
@@ -646,6 +687,22 @@ function startOverlayLoop() {
       }
       const ms = Date.now() - t0;
       const W = snap.width, H = snap.height;
+      // One-shot calibration: the first completed inference measures the
+      // real delegate + speed and arms the weak-device policy.
+      if (!visionPerf) {
+        try {
+          let dlg = viaWorker ? workerDelegate : null;
+          if (!dlg) {
+            try {
+              const di = await describeEstimator();
+              dlg = (di && di.delegate) || 'CPU';
+            } catch (e) { dlg = 'CPU'; }
+          }
+          assessVision(dlg, ms);
+          // NOTE: no early return here — the policy stops future ticks,
+          // but this tick still renders its results below.
+        } catch (e) { /* calibration must never break the loop */ }
+      }
       if (lm) {
         for (const p of lm) {
           sg.fillStyle = '#22d3ee';
@@ -765,9 +822,11 @@ async function testVisionPipeline() {
     await ensureEstimator();
     const loadMs = Date.now() - t0;
     let inv = 'n/a';
+    let testDelegate = 'CPU';
     try {
       const info = await describeEstimator();
       inv = 'ctor=' + info.ctor + ' detect=' + info.hasDetect + ' detectForVideo=' + info.hasDetectForVideo + ' delegate=' + info.delegate + ' blaze=' + info.blazeDelegate;
+      testDelegate = (info && info.delegate) || 'CPU';
     } catch (e) { inv = 'inventory-failed: ' + e.message; }
     const native = (typeof estimateBox === 'function');
     let nativeSupport = 'unknown';
@@ -808,6 +867,12 @@ async function testVisionPipeline() {
     }
     const detectMs = Date.now() - d0;
     const obs = lm ? faceObservation(lm) : { face: false };
+    // The test doubles as device calibration: measured engine + speed arm
+    // the weak-device policy (live dots auto-pause) before the camera even
+    // turns on. Never allowed to break the test report itself.
+    try {
+      assessVision(workerUsed ? workerEngineT : testDelegate, detectMs);
+    } catch (e) { /* assessment is advisory only */ }
     const vw = (typeof cameraPreview !== 'undefined' && cameraPreview.videoWidth) || 0;
     say('Pipeline OK (load ' + loadMs + 'ms, detect ' + detectMs + 'ms, ' +
       'estimator: ' + inv + ', ' +
@@ -823,6 +888,18 @@ async function testVisionPipeline() {
 }
 
 document.getElementById('visionTestBtn').addEventListener('click', testVisionPipeline);
+// Weak-device override: user accepts the lag and wants live dots anyway.
+document.getElementById('forceOverlayBtn').addEventListener('click', () => {
+  visionForceLive = true;
+  try {
+    document.getElementById('forceOverlayBtn').hidden = true;
+  } catch (e) { /* button visibility is cosmetic */ }
+  if (typeof cameraHintEl !== 'undefined' && cameraHintEl) {
+    cameraHintEl.textContent = 'Live dots forced on — expect lag on this device.';
+  }
+  log('Live dots forced on (weak-device override)');
+  if (cameraStream) startOverlayLoop();
+});
 const healthLineEl = document.getElementById('healthLine');
 const statsLineEl = document.getElementById('statsLine');
 const attemptTimerEl = document.getElementById('attemptTimer');
