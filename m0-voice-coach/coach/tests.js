@@ -19,6 +19,7 @@ const { opponentReply, diagnoseDebate } = require('./debate-llm');
 const { ROLES, getRole, validateQuestion, validateInterviewDiagnosis, stockFollowup, diagnoseInterviewRules, STOCK_FOLLOWUPS } = require('./interview');
 const { interviewerNext, diagnoseInterview } = require('./interview-llm');
 const { LANGS, normalizeLang, langEntry, languageLine } = require('./language');
+const { dayKey, trackCommands, statsCommands, parseStatsResults, trackerConfigured } = require('./tracker');
 const { buildVoiceOpponentPrompt } = require('./voice-opponent');
 const { splitSpokenText } = require('../public/speech-out');
 const { formatElapsed, dayStats, withTimeout } = require('../public/stats');
@@ -740,5 +741,35 @@ if (fail) process.exit(1);
   }
 
   console.log('SPEECH-RESULT pass=' + pass + ' fail=' + fail);
+
+  // ---------- owner traffic tracker (pure command builders) ----------
+  {
+    ok('tracker not configured without env', trackerConfigured({}) === false && trackerConfigured({ UPSTASH_REDIS_REST_URL: 'https://x.upstash.io', UPSTASH_REDIS_REST_TOKEN: 't' }) === true, '');
+    ok('tracker day key UTC', dayKey(Date.UTC(2026, 10, 16)) === '20261116', '');
+    const viewCmds = trackCommands({ type: 'view', session: 'sess!!weird##', now: 0 });
+    ok('tracker view commands', viewCmds.length === 6 && viewCmds[0][0] === 'ZADD' && viewCmds[0][3] === 'sessweird' && viewCmds[1][0] === 'HINCRBY' && viewCmds[1][1] === 'stats' && viewCmds[5][0] === 'PFADD', '');
+    ok('tracker heartbeat one command', JSON.stringify(trackCommands({ type: 'heartbeat', session: 's', now: 5 })) === JSON.stringify([['ZADD', 'live', '5', 's']]), '');
+    const pressCmds = trackCommands({ type: 'press', name: 'attempt_start', session: 's', now: 0 });
+    ok('tracker press increments name', pressCmds.length === 3 && pressCmds[0][0] === 'HINCRBY' && pressCmds[0][2] === 'presses:attempt_start' && pressCmds[1][1].endsWith(dayKey(0)), '');
+    ok('tracker rejects unknown press name', trackCommands({ type: 'press', name: 'nope', session: 's', now: 0 }) === null, '');
+    ok('tracker rejects unknown type', trackCommands({ type: 'boom', session: 's', now: 0 }) === null, '');
+    ok('tracker session sanitized', trackCommands({ type: 'view', session: 'a'.repeat(200), now: 0 })[0][3].length === 64, '');
+    ok('tracker empty session becomes anon', trackCommands({ type: 'heartbeat', session: '///', now: 0 })[0][3] === 'anon', '');
+    const statCmds = statsCommands(600000);
+    ok('tracker stats commands', statCmds[0][0] === 'ZREMRANGEBYSCORE' && statCmds[1][0] === 'ZCOUNT' && statCmds[1][2] === '540000' && statCmds[3][1].endsWith(dayKey(600000)), '');
+    const parsed = parseStatsResults(
+      [{ result: 0 }, { result: 3 }, { result: { views: '10', 'presses:connect': '4' } }, { result: { views: '2' } }, { result: 7 }, { result: 99 }, { result: 1 }],
+      600000
+    );
+    ok('tracker parse live+day', parsed.enabled === true && parsed.liveViewers === 3 && parsed.day === dayKey(600000) && parsed.liveWindowSec === 60, '');
+    ok('tracker parse today+all', parsed.today.views === 2 && parsed.today.uniques === 7 && parsed.allTime.views === 10 && parsed.allTime.uniques === 99, '');
+    ok('tracker parse presses', parsed.allTime.presses.connect === 4 && parsed.today.presses.connect === 0 && parsed.today.presses.attempt_start === 0, '');
+    const parsedPairs = parseStatsResults([{}, { result: 0 }, { result: ['views', '5'] }, { result: {} }, { result: 0 }, { result: 0 }, {}], 0);
+    ok('tracker parse pair-array hash', parsedPairs.allTime.views === 5, '');
+    const parsedEmpty = parseStatsResults([null, null, null, null, null, null, null], 0);
+    ok('tracker parse tolerates missing', parsedEmpty.enabled === true && parsedEmpty.liveViewers === 0 && parsedEmpty.allTime.views === 0, '');
+  }
+
+  console.log('TRACK-RESULT pass=' + pass + ' fail=' + fail);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.log('FAIL llm harness crashed: ' + e.message); process.exit(1); });

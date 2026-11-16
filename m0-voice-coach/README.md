@@ -25,6 +25,35 @@ npm start
 
 Open http://localhost:3000 (Chrome or Edge recommended).
 
+## Owner traffic stats (counts only)
+
+The site ships a small tracker for the owner: anonymous per-tab random IDs,
+page views, 60-second heartbeats (so "viewers right now" means tabs viewed
+within the last minute), and presses of the main buttons. No IPs, no
+transcripts, no audio; unique counts use a one-way sketch. Two layers,
+both optional:
+
+1. **Vercel built-in analytics** (free): visitors, views, referrers, countries.
+   Enable once: Vercel dashboard → your project → Analytics → Enable. Note it
+   is dashboard-only (custom events need a paid plan) and commonly blocked by
+   ad blockers.
+2. **Your own live numbers** (authoritative source): create a free Redis at
+   [upstash.com](https://upstash.com) (choose **REST**), then in Vercel →
+   your project → Settings → Environment Variables add
+   `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` and redeploy.
+   Read the numbers:
+
+   ```
+   python orator_stats.py             # one snapshot
+   python orator_stats.py --watch 15  # refresh every 15 s
+   ```
+
+   The script lives at the repo root, needs no keys (it reads the public
+   `/api/stats` endpoint), and prints live viewers, today's views/uniques/
+   presses, and all-time totals. Without the Upstash env vars everything
+   above stays off and the site behaves exactly as before.
+
+
 ## How to practice
 
 1. Read the practice prompt, or press **New prompt** for another one.

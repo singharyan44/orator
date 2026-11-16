@@ -19,6 +19,7 @@ const { interviewerNext, diagnoseInterview } = require('../coach/interview-llm')
 const { buildVoiceOpponentPrompt } = require('../coach/voice-opponent');
 const { compareAttempts } = require('../coach/compare');
 const { normalizeLang } = require('../coach/language');
+const { trackCommands, statsCommands, parseStatsResults, trackerConfigured } = require('../coach/tracker');
 
 // UI language preference, normalized once per request. AI-generated text
 // follows it; deterministic rules/static fallbacks stay in authored
@@ -502,6 +503,52 @@ function deliverySummary(delivery) {  const words = delivery.reduce((a, m) => a 
     turnCount: delivery.length,
   };
 }
+
+// ---------- Owner traffic tracker (counts only; see coach/tracker.js) ----------
+// Writes go to a free Upstash Redis (REST) when configured; without the env
+// vars every answer here is { enabled: false } and the client stays silent.
+async function upstashPipeline(commands) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  const res = await fetch(String(url).replace(/\/+$/, '') + '/pipeline', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(commands),
+  });
+  if (!res.ok) throw new Error('Upstash pipeline returned ' + res.status);
+  return res.json();
+}
+
+// One client event: view / heartbeat / press. Unknown types or press names
+// are rejected (whitelist — the public endpoint cannot write arbitrary keys).
+app.post('/api/track', async (req, res) => {
+  const now = Date.now();
+  const body = req.body || {};
+  const commands = trackCommands({ type: body.type, name: body.name, session: body.session, now });
+  if (!commands) return res.status(400).json({ error: 'Unknown event.' });
+  if (!trackerConfigured(process.env)) return res.json({ enabled: false });
+  try {
+    await upstashPipeline(commands);
+    res.json({ enabled: true });
+  } catch (err) {
+    console.error('Tracker write unavailable:', err.message);
+    res.json({ enabled: false, error: 'tracker-unavailable' });
+  }
+});
+
+// The owner's reader: python orator_stats.py at the repo root, or any GET.
+app.get('/api/stats', async (req, res) => {
+  const now = Date.now();
+  if (!trackerConfigured(process.env)) return res.json({ enabled: false });
+  try {
+    const results = await upstashPipeline(statsCommands(now));
+    res.json(parseStatsResults(results || [], now));
+  } catch (err) {
+    console.error('Tracker read unavailable:', err.message);
+    res.json({ enabled: true, error: 'stats-unavailable' });
+  }
+});
 
 // Unknown API routes answer JSON (the client parses every API response).
 app.use('/api', (req, res) => {

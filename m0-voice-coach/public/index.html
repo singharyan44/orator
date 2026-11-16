@@ -12,6 +12,11 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Orator — Speech Coach</title>
   <link rel="stylesheet" href="style.css" />
+  <!-- Vercel's built-in analytics (dashboard aggregates only; enable once in
+       the Vercel project's Analytics tab). Often blocked by ad blockers —
+       our own /api/track tracker is the authoritative source. -->
+  <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
+  <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
   <div class="container">
@@ -258,5 +263,6 @@
   <script src="debate.js"></script>
   <script src="voice-debate.js"></script>
   <script src="interview.js"></script>
+  <script src="tracker.js"></script>
 </body>
 </html>
